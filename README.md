@@ -19,9 +19,9 @@ GREAT: a Group Recommendation Evaluation and Analysis Tool
 ---
 
 ## ✨ Features
-
-- ✅ Group and individual recommendations
-- ✅ Structured user interaction analysis
+GREAT provides a comprehensive environment for user profiling, interaction tracking, and recommendation management within collaborative settings. Its main features include:
+- ✅ Support for both group and individual recommendations
+- ✅ Structured analysis of user interactions
 - ✅ Live evaluation with real users 
 
 ---
@@ -45,7 +45,7 @@ Before running the project, make sure you have:
 - Java `>= v18.12.1`
 - Node.js `>= v18.12.1`
 - Python `>= 3.9`
-- Docker (optional but recommended to run MongDb for experimentation)
+- Docker (optional but recommended to run MongoDb for experimentation)
 
 ### Project setup
 First, clone this repository.
