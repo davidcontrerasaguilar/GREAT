@@ -18,6 +18,25 @@ GREAT: a Group Recommendation Evaluation and Analysis Tool
 
 ---
 
+## About
+This repository contains the implementation and resources accompanying the research paper **“GREAT: A Group Recommender Evaluation and Analysis Tool”**.
+
+GREAT (Group Recommender Evaluation and Analysis Tool) is a domain-independent platform designed to capture and analyze structured user interactions during live group recommendation sessions. The tool shifts the focus from post-hoc performance evaluation to real-time modeling of user behavior, integrating interaction signals directly into the recommendation process.
+
+The repository provides an integrated environment that supports user profiling, interaction monitoring, and recommendation management in collaborative contexts. Specifically, it includes:
+
+An interaction-aware graphical interface that records a broad range of user actions (e.g., suggestions, views, favorites) within a collaborative filtering–based GRS;
+
+An interaction-based scoring mechanism that infers collaboration and leadership roles from live user behavior; and
+
+Scripts and configurations to reproduce the live-user study with 18 groups (72 participants), demonstrating how interaction patterns shape group dynamics, consensus formation, and satisfaction.
+
+The datasets section contains curated snapshots of the data used to simulate and evaluate the experiments.
+
+By releasing this repository, we aim to support further empirical research on the social and behavioral processes underlying group recommendation.
+
+
+
 ## ✨ Features
 GREAT provides a comprehensive environment for user profiling, interaction tracking, and recommendation management within collaborative settings. Its main features include:
 - ✅ Support for both group and individual recommendations
