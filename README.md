@@ -1,13 +1,17 @@
 # GREAT
 GREAT: a Group Recommendation Evaluation and Analysis Tool
 
+![Main interface](./assets/main_interface.png)
+
+A demonstration video of GREAT is available [online](https://tinyurl.com/yspmnc26).
+
 ---
 
 ## 📦 Table of Contents
 
-- [About](#about)
 - [Features](#features)
 - [Tech Stack](#tech-stack)
+- [System Architecture](#system-architecture)
 - [Getting Started](#getting-started)
   - [Project setup](#project-setup)
   - [Data Storage setup](#data-storage-setup)
@@ -29,10 +33,16 @@ GREAT provides a comprehensive environment for user profiling, interaction track
 ## 🧱 Tech Stack
 
 **Languages:** Python, Javascript, Java.  
-**Frameworks:** FastAPI, Node, React.  
+**Frameworks:** FastAPI, Node, React, GroupLibRec.  
 **Database:** MongoDb.  
 **Containerization (optional):** Docker.  
-**Other:** WebSockets (Socket.io).
+**Other:** WebSockets.
+
+---
+
+## 🏗️ System Architecture
+
+![System Architecture](./assets/system_architecture.png)
 
 ---
 
@@ -178,3 +188,8 @@ REACT_APP_FRONT=http://${REACT_APP_BASE_IP}:3000
 ```
 
 Replace `REACT_APP_BASE_IP` with your desired ip.
+
+Finally, start the web interface:
+```bash
+npm start
+```
