@@ -1,14 +1,12 @@
 # GREAT
 GREAT: a Group Recommendation Evaluation and Analysis Tool
 
-![Main interface](./assets/main_interface.png)
-
-A demonstration video of GREAT is available [online](https://tinyurl.com/yspmnc26).
+![System Architecture](./assets/system_architecture.png)
 
 ---
 
 ## 📦 Table of Contents
-
+- [Overview](#overview)
 - [Features](#features)
 - [Tech Stack](#tech-stack)
 - [System Architecture](#system-architecture)
@@ -22,7 +20,7 @@ A demonstration video of GREAT is available [online](https://tinyurl.com/yspmnc2
 
 ---
 
-## About
+## 🧩 Overview
 This repository contains the implementation and resources accompanying the research paper **“GREAT: A Group Recommender Evaluation and Analysis Tool”**.
 
 **GREAT** (Group Recommender Evaluation and Analysis Tool) is a domain-independent platform designed to capture and analyze structured user interactions during live group recommendation sessions. The tool shifts the focus from post-hoc performance evaluation to real-time modeling of user behavior, integrating interaction signals directly into the recommendation process.
@@ -59,9 +57,11 @@ GREAT provides a comprehensive environment for user profiling, interaction track
 
 ---
 
-## 🏗️ System Architecture
+## 🎯 Interaction-aware graphical interface
 
-![System Architecture](./assets/system_architecture.png)
+![Main interface](./assets/main_interface.png)
+
+A demonstration video of GREAT is available [online](https://tinyurl.com/yspmnc26).
 
 ---
 
