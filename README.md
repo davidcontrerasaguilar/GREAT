@@ -40,10 +40,10 @@ By releasing this repository, we aim to support further empirical research on th
 
 
 ## ✨ Features
-GREAT provides a comprehensive environment for user profiling, interaction tracking, and recommendation management within collaborative settings. Its main features include:
-- ✅ Support for both group and individual recommendations
-- ✅ Structured analysis of user interactions
-- ✅ Live evaluation with real users 
+GREAT provides a comprehensive environment for _user profiling_, _interaction tracking_, and _recommendation management_ within collaborative settings. Its main features include:
+ ✅ Support for both group and individual recommendations
+ ✅ Structured analysis of user interactions
+ ✅ Live evaluation with real users 
 
 ---
 
@@ -59,36 +59,79 @@ GREAT provides a comprehensive environment for user profiling, interaction track
 
 ## 🎯 Interaction-aware graphical interface
 
+A demonstration video of GREAT is available [online](https://tinyurl.com/yspmnc26).
+
+### Main Group Recommendation Interface
+
 ![Main interface](./assets/main_interface.png)
 
+### Additional Interface Figures
 
-<table cellspacing="30">
+To support reproducibility and transparency, the following figures present some **representative examples** of webpages from the **GREAT** recommendation system.  
+
+<table style="width:100%;" cellspacing="30">
   <tr>
-    <td align="center">
-      <img src="./assets/1. register_en.png" width="600" alt="Descripción 1"><br/>
-      <sub>Etiqueta 1</sub>
+    <td style="width:50%;" align="center">
+      <img src="./assets/1. register_en.png" style="width:100%;" alt="Register interface"><br/>
+      <sub><b>Register interface</b></sub>
     </td>
     <td align="center">
-      <img src="./assets/2. login_en.png" width="600" alt="Descripción 2"><br/>
-      <sub>Etiqueta 2</sub>
+      <img src="./assets/2. login_en.png" style="width:100%;" alt="Login interface"><br/>
+      <sub><b>Login interface</b></sub>
     </td>
   </tr>
   <tr>
   </tr>  
   <tr>
     <td align="center">
-      <img src="./assets/3. waiting-room_en.png" width="600" alt="Descripción 3"><br/>
-      <sub>Etiqueta 3</sub>
+      <img src="./assets/3. waiting-room_en.png" style="width:100%;" alt="Waiting room interface"><br/>
+      <sub><b>Waiting room interface</b></sub>
     </td>
     <td align="center">
-      <img src="./assets/4. rooms_en.png" width="600" alt="Descripción 3"><br/>
-      <sub>Etiqueta 3</sub>
+      <img src="./assets/4. rooms_en.png" style="width:100%;" alt="Available rooms interface"><br/>
+      <sub><b>Available rooms interface</b></sub>
+    </td>
+  </tr>
+  <tr>
+  </tr>  
+  <tr>
+    <td align="center">
+      <img src="./assets/5. personality_test_en.png" style="width:100%;" alt="Personality questionnaire (test) interface"><br/>
+      <sub><b>Personality questionnaire (test) interface</b></sub>
+    </td>
+    <td align="center">
+      <img src="./assets/6. rec_en.png" style="width:100%;" alt="Recommendations section interface"><br/>
+      <sub><b>Recommendations section interface</b></sub>
+    </td>
+  </tr>
+  <tr>
+  </tr>  
+  <tr>
+    <td align="center">
+      <img src="./assets/7. rec_atodos_en.png" style="width:100%;" alt="Group suggestions interface"><br/>
+      <sub><b>Group suggestions interface</b></sub>
+    </td>
+    <td align="center">
+      <img src="./assets/8. fav_en.png" style="width:100%;" alt="Room's favorites interface"><br/>
+      <sub><b>Room's favorites interface</b></sub>
+    </td>
+  </tr>
+  <tr>
+  </tr>  
+  <tr>
+    <td align="center">
+      <img src="./assets/9. rating blue button - song rated.png" style="width:100%;" alt="Rating recommendations interface"><br/>
+      <sub><b>Rating recommendations interface</b></sub>
+    </td>
+    <td align="center">
+      <img src="./assets/10. end-test-en.png" style="width:100%;" alt="Group consensus recommendation and experience questionnaire interface"><br/>
+      <sub><b>Group consensus recommendation and experience questionnaire interface</b></sub>
     </td>
   </tr>
 </table>
 
 
-A demonstration video of GREAT is available [online](https://tinyurl.com/yspmnc26).
+
 
 ---
 
