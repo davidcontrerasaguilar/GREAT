@@ -27,11 +27,11 @@ This repository contains the implementation and resources accompanying the resea
 
 The repository provides an integrated environment that supports user profiling, interaction monitoring, and recommendation management in collaborative contexts. Specifically, it includes:
 
-An **interaction-aware graphical interface** that records a broad range of user actions (e.g., suggestions, views, favorites) within a collaborative filtering–based GRS;
+- An **interaction-aware graphical interface** that records a broad range of user actions (e.g., suggestions, views, favorites) within a collaborative filtering–based GRS;
 
-An **interaction-based scoring mechanism** that infers collaboration and leadership roles from live user behavior; and
+- An **interaction-based scoring mechanism** that infers collaboration and leadership roles from live user behavior; and
 
-Scripts and configurations to **reproduce the live-user study** with 18 groups (72 participants), demonstrating how interaction patterns shape group dynamics, consensus formation, and satisfaction.
+- Scripts and configurations to **reproduce the live-user study** with 18 groups (72 participants), demonstrating how interaction patterns shape group dynamics, consensus formation, and satisfaction.
 
 The **datasets section** contains curated snapshots of the data used to simulate and evaluate the experiments.
 
@@ -60,6 +60,33 @@ GREAT provides a comprehensive environment for user profiling, interaction track
 ## 🎯 Interaction-aware graphical interface
 
 ![Main interface](./assets/main_interface.png)
+
+
+<table cellspacing="30">
+  <tr>
+    <td align="center">
+      <img src="./assets/1. register_en.png" width="600" alt="Descripción 1"><br/>
+      <sub>Etiqueta 1</sub>
+    </td>
+    <td align="center">
+      <img src="./assets/2. login_en.png" width="600" alt="Descripción 2"><br/>
+      <sub>Etiqueta 2</sub>
+    </td>
+  </tr>
+  <tr>
+  </tr>  
+  <tr>
+    <td align="center">
+      <img src="./assets/3. waiting-room_en.png" width="600" alt="Descripción 3"><br/>
+      <sub>Etiqueta 3</sub>
+    </td>
+    <td align="center">
+      <img src="./assets/4. rooms_en.png" width="600" alt="Descripción 3"><br/>
+      <sub>Etiqueta 3</sub>
+    </td>
+  </tr>
+</table>
+
 
 A demonstration video of GREAT is available [online](https://tinyurl.com/yspmnc26).
 
