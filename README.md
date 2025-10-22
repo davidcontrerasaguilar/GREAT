@@ -41,9 +41,9 @@ By releasing this repository, we aim to support further empirical research on th
 
 ## ✨ Features
 GREAT provides a comprehensive environment for _user profiling_, _interaction tracking_, and _recommendation management_ within collaborative settings. Its main features include:
- ✅ Support for both group and individual recommendations
- ✅ Structured analysis of user interactions
- ✅ Live evaluation with real users 
+- ✅ Support for both group and individual recommendations
+- ✅ Structured analysis of user interactions
+- ✅ Live evaluation with real users 
 
 ---
 
