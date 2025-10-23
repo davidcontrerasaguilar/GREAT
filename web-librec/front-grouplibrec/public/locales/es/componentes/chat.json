@@ -1,0 +1,44 @@
+{
+    "main":{
+        "title": "Sala chat",
+        "joinedRoom": {
+            "user": "El usuario ",
+            "joined": "se ha unido a la sala!"
+        },
+        "exitedRoom": {
+            "user": "El usuario ",
+            "exited": "ha salido de la sala!"
+        },
+        "waitingRoom": {
+            "user": "El usuario",
+            "finalize": "ha concluido y esta esperado a todos que finalicen"
+        },
+        "user": {
+            "userRecommend": {
+                "user": "El usuario ",
+                "recommends": "te recomendó "
+            },
+            "recommendUser": {
+                "youRecommend": "Recomendaste ",
+                "to": "a "
+            }
+        },
+        "group": {
+            "userRecommend": {
+                "user": "El usuario ",
+                "recommends": "recomienda "
+            },
+            "addedFavorites": {
+                "user": "El usuario ",
+                "added": "añadió ",
+                "toFavorites": "a favoritos"
+            },
+            "removedFavorites": {
+                "user": "El usuario ",
+                "removed": "quitó ",
+                "toFavorites": "de favoritos"
+            }
+        },
+        "input": "Escriba un mensaje"
+    }
+}

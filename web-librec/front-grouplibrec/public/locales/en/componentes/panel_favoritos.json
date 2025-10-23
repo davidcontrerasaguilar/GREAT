@@ -1,0 +1,6 @@
+{
+    "main": {
+        "title": "Room's favorites",
+        "warning": "Unable to remove items, there are users in the waiting room. Please rate the ones you are missing and press the flag icon to finish."
+    }
+}

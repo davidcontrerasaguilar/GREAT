@@ -1,0 +1,74 @@
+{
+    "main": {
+        "title": "",
+        "description": "",
+        "buttons": "",
+        "termino": "Congratulations! We've completed the tour. Let's head to the available rooms to get started.",
+        "steps": {
+            "title": {
+                "title": "Welcome to the training room!",
+                "description": "We'll take a look at the system's features! Get ready!"
+            },
+            "users": {
+                "title": "Who's online?",
+                "description": "You can see the users connected to the room in real-time!"
+            },
+            "users2": {
+                "title": "I am the leader!",
+                "description": "The room leader is represented by a crown!"
+            },
+            "indiv-rec": {
+                "title": "Individual Recommendations",
+                "description": "Here, you will see recommendations for you. Only you can see them!"
+            },
+            "indiv-rec-1": {
+                "title": "Recommend!",
+                "description": "Use this button to recommend to a user or the entire room!"
+            },
+            "indiv-rec-2": {
+                "title": "I want it!",
+                "description": "Add the item to favorites! Everyone will be able to see that you like this song."
+            },
+            "indiv-rec-3": {
+                "title": "I want to see more details",
+                "description": "Find more detailed information about the song. You can also rate it if you want."
+            },
+            "group-rec": {
+                "title": "Recommendations for Everyone",
+                "description": "Here, you will see the room recommendations. Everyone can see them!"
+            },
+            "chat": {
+                "title": "Group Chat",
+                "description": "You can communicate with the users in the room! Events performed by users will appear, and you can click on them."
+            },
+            "history": {
+                "title": "Forgot a song?",
+                "description": "Use this button to view the history of past recommendations."
+            },
+            "calificar": {
+                "title": "I feel like discovering something new",
+                "description": "Discover new songs and rate them! The system will show you new songs!"
+            },
+            "indiv-botonrec": {
+                "title": "I want my recommendations",
+                "description": "Press this button to request recommendations from the system for yourself."
+            },
+            "group-botonrec": {
+                "title": "I want recommendations for everyone!",
+                "description": "Press this button to request recommendations for everyone. Only available for the room leader!"
+            },
+            "salas": {
+                "title": "I want to see other rooms",
+                "description": "Use this button to return to the available rooms."
+            },
+            "favourites": {
+                "title": "We love these songs",
+                "description": "Check out the users' favorites. The maximum is 7 songs per group. Each user must have at least 1 song in favorites."
+            },
+            "flag": {
+                "title": "I'm done",
+                "description": "Head to the waiting room to finish. You must have rated all the songs in favorites."
+            }
+        }
+    }
+}

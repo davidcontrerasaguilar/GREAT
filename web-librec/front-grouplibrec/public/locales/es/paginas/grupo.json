@@ -1,0 +1,17 @@
+{
+    "main":{
+        "roomName": "{{titleRoom}} - Sala de {{leaderName}}",
+        "users": {
+            "connected": "Conectados"
+        },
+        "alert": {
+            "maxFavorites": "Los favoritos de la sala no deben exeder de {{max}} canciones.",
+            "consensus": {
+                "1": "La sala debe tener exactamente {{max}} favoritos.",
+                "2": "Faltan canciones por calificar." ,
+                "3": "Todos los usuarios deben añadir como mínimo 1 canción."
+            },
+            "exists": "Esta canción ya se encuentra agregada a favoritos"
+        }
+    }
+}

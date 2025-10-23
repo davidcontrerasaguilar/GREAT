@@ -1,0 +1,5 @@
+**/node_modules/
+**/.env
+/web-librec/server-grouplibrec/images
+/recomendations
+/data_storage
