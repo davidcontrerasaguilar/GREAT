@@ -1,0 +1,17 @@
+{
+    "main":{
+        "roomName": "{{titleRoom}} - {{leaderName}}'s room",
+        "users": {
+            "connected": "Connected"
+        },
+        "alert": {
+            "maxFavorites": "Room's favorites must not exceed {{max}} songs.",
+            "consensus": {
+                "1": "The room must have exactly {{max}} songs.",
+                "2": "Some songs are unrated." ,
+                "3": "Every user must have added at least 1 song."
+            },
+            "exists": "This song is already added to favorites"
+        }
+    }
+}

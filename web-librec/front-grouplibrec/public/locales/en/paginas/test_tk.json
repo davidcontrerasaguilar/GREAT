@@ -1,0 +1,139 @@
+{
+    "main":{
+        "title": "Thomas-Kilmann Test",
+        "subtitle": "Instructions",
+        "instructions1": "Finally, this last questionnarie will identify your individual behavior in situations of conflict. There are five methods for addressing conflicts, which are:",
+        "dimensionCompeticion": "Competition",
+        "dimensionConciliador": "Accommodating",
+        "dimensionEvitador": "Avoiding",
+        "dimensionColaborador": "Collaborating",
+        "dimensionNegociador": "Compromising",
+        "and": "and",
+        "instructions2": "These methods will help us describe your level of behavior according to: your assertiveness and cooperation. You will be presented with two scenarios in each question. Answer this questionnaire based on the reaction you would likely have in such scenarios. If you feel there is no correct answer, choose the one closest one.",
+        "questionnaireTitle": "Questionnaire",
+        "button": "Continue",
+        "alert":"You must answer all questions.",
+        "questionnaire": {
+            "1": {
+                "A": "There are opportunities where I let others take responsibility to solve the problem.",
+                "B": "Instead of negotiating points of disagreement, I try to emphasize the aspects on which we agree."
+            },
+            "2": {
+                "A": "I try to find a compromise solution.",
+                "B": "I try to take into account all the points that concern me and the other person."
+            },
+            "3": {
+                "A": "Usually, I am determined to achieve my goals.",
+                "B": "I can try to smooth things over and maintain the relationship."
+            },
+            "4": {
+                "A": "I try to find a compromise solution.",
+                "B": "Sometimes I sacrifice my own desires in favor of the other person's."
+            },
+            "5": {
+                "A": "Consistently, I seek the other's help to find a solution.",
+                "B": "I try to do what I can to avoid unnecessary tensions."
+            },
+            "6": {
+                "A": "I try to avoid displeasure.",
+                "B": "I try to impose my position."
+            },
+            "7": {
+                "A": "I try to postpone the issue until I've had time to think it over.",
+                "B": "I compromise on some points in exchange for achieving others."
+            },
+            "8": {
+                "A": "Usually, I am determined to achieve my goals.",
+                "B": "I try to bring all doubts and problems to the surface immediately."
+            },
+            "9": {
+                "A": "I feel that it's not always worth worrying about differences.",
+                "B": "I make efforts to get my way."
+            },
+            "10": {
+                "A": "I am determined to achieve my goals.",
+                "B": "I try to find a compromise solution."
+            },
+            "11": {
+                "A": "I try to bring all doubts and problems to light immediately.",
+                "B": "I can try to smooth things over and maintain the relationship."
+            },
+            "12": {
+                "A": "Sometimes I avoid taking positions that may create controversy.",
+                "B": "I accept some of the other's arguments if he allows me to maintain some of mine."
+            },
+            "13": {
+                "A": "I propose a middle position.",
+                "B": "I press for my views."
+            },
+            "14": {
+                "A": "I express my ideas and request his/hers.",
+                "B": "I try to demonstrate the logic and benefits of my position."
+            },
+            "15": {
+                "A": "I can try to smooth things over and maintain the relationship.",
+                "B": "I try to do whatever is necessary to avoid tensions."
+            },
+            "16": {
+                "A": "I try not to hurt the other's feelings.",
+                "B": "I try to convince the other person of the merits of my position."
+            },
+            "17": {
+                "A": "Usually, I am determined to achieve my goals.",
+                "B": "I try to do what I can to avoid unnecessary tensions."
+            },
+            "18": {
+                "A": "If it makes the other person happy, I might let them maintain their viewpoints.",
+                "B": "I accept some of the other's arguments if he allows me to maintain some of mine."
+            },
+            "19": {
+                "A": "I try to bring all doubts and problems to the surface immediately.",
+                "B": "I try to postpone the issue until I've had time to think it over."
+            },
+            "20": {
+                "A": "I try to resolve our differences immediately.",
+                "B": "I try to find a fair combination of gains and losses for both."
+            },
+            "21": {
+                "A": "When starting negotiations, I try to be considerate of the other person's desires.",
+                "B": "I always lean towards a direct discussion of the problem."
+            },
+            "22": {
+                "A": "I try to find a position that is intermediate between mine and his.",
+                "B": "I impose my desires."
+            },
+            "23": {
+                "A": "I often worry about satisfying all our desires.",
+                "B": "There are opportunities where I let others take responsibility to solve the problem."
+            },
+            "24": {
+                "A": "If the other person's position seems very important to them, I try to fulfill their desires.",
+                "B": "I try to get them to agree to a compromise solution."
+            },
+            "25": {
+                "A": "I try to demonstrate the logic and benefits of my position.",
+                "B": "When starting negotiations, I try to be considerate of the other person's desires."
+            },
+            "26": {
+                "A": "I propose a middle proposition.",
+                "B": "I almost always worry about satisfying all our desires."
+            },
+            "27": {
+                "A": "Sometimes I avoid taking positions that may create controversy.",
+                "B": "If it makes the other person happy, I might let them maintain their viewpoints."
+            },
+            "28": {
+                "A": "Usually, I am determined to achieve my goals.",
+                "B": "Usually, I seek the other's help to find a solution."
+            },
+            "29": {
+                "A": "I propose a middle position.",
+                "B": "I feel that it's not always worth worrying."
+            },
+            "30": {
+                "A": "I try not to hurt the other's feelings.",
+                "B": "I always share the problem with the other person so we can solve it together."
+            }
+        }
+    }
+}

@@ -1,0 +1,3646 @@
+//import 'dotenv/config'
+import dotenv from "dotenv"
+import dotenvExpand from "dotenv-expand"
+import express, { application } from "express"
+import { Server as socketServer } from "socket.io"
+import http from "http"
+import cors from "cors"
+import { MongoClient, ObjectId } from "mongodb";
+import child_process from 'child_process'
+import fileUpload from 'express-fileupload'
+import * as fs from "fs"
+import winston from "winston"
+
+const { combine, timestamp, json } = winston.format
+
+const exec = child_process.exec
+const spawn = child_process.spawn
+
+const app = express()
+const server = http.createServer(app)
+
+const io = new socketServer(server, {
+    cors: {
+        origin: "*"
+    }
+})
+
+dotenvExpand.expand(dotenv.config())
+
+const server_ip = process.env.SERVER_IP
+const exec_grouplibrec = process.env.DIR_GROUPLIBREC
+const exec_individualLibrec = process.env.DIR_INDIVIDUALLIBREC
+const exec_librec = process.env.DIR_LIBREC
+
+const dir_individual_basemodel =   process.env.DIR_INDIVIDUAL_BASEMODEL 
+const dir_group_size_2_basemodel = process.env.DIR_GROUP_SIZE_2_BASEMODEL
+const dir_group_size_3_basemodel = process.env.DIR_GROUP_SIZE_3_BASEMODEL
+const dir_group_size_4_basemodel = process.env.DIR_GROUP_SIZE_4_BASEMODEL
+
+const dir_individual_datamodel =   process.env.DIR_INDIVIDUAL_DATAMODEL 
+const dir_group_size_2_datamodel = process.env.DIR_GROUP_SIZE_2_DATAMODEL
+const dir_group_size_3_datamodel = process.env.DIR_GROUP_SIZE_3_DATAMODEL
+const dir_group_size_4_datamodel = process.env.DIR_GROUP_SIZE_4_DATAMODEL
+
+const dir_recommendations = process.env.DIR_RECOMMENDATIONS
+const dir_recommendations_users = process.env.DIR_RECOMMENDATIONS_USERS
+const dir_recommendations_dataset_users = process.env.DIR_RECOMMENDATIONS_DATASET_USERS_DATA
+const user_recomendations_properties = process.env.USER_RECOMMENDATIONS_PROPERTIES
+const group_recomendations_properties = process.env.GROUP_RECOMMENDATIONS_PROPERTIES
+const recommendations_results_users = process.env.RECOMMENDATIONS_RESULTS_USERS
+const dir_dataset_images = process.env.DIR_IMAGES
+const dir_recommendations_rooms = process.env.DIR_RECOMMENDATIONS_ROOMS
+const dir_recommendations_results = process.env.DIR_RECOMMENDATIONS_RESULTS
+const dir_ratings = process.env.DIR_RATINGS
+const dir_icons_users = process.env.DIR_ICONS_USERS
+const dataset_images = process.env.IMAGES
+const dir_icons = process.env.DIR_ICONS
+const db_url = process.env.DB_URL
+const db_name = process.env.DB_NAME
+
+const dir_logs = process.env.DIR_LOG
+
+const socket_port = process.env.SOCKET_PORT
+const server_port = process.env.SERVER_PORT
+
+const consoleFormatLog = winston.format.printf(({ message }) => {
+    return `${message}`
+})
+
+const fileFormatLog = winston.format.combine(
+    timestamp({
+        format: 'hh:mm:ss A DD-MM-YYYY'
+    }), json()
+)
+
+const LOG = winston.createLogger({
+    level: 'info',
+    transports: [
+        new winston.transports.File({
+            filename: `${dir_logs}/system.log`,
+            format: fileFormatLog
+        }),
+        new winston.transports.Console({
+            format: consoleFormatLog
+        }
+        )
+    ],
+})
+
+const systemLogEvent = (newEvent) => {
+    return { "event": newEvent }
+}
+
+io.attach(socket_port)
+
+app.use(cors())
+app.use(express.json())
+app.use(dataset_images, express.static("imagenes"))
+app.use(dir_icons, express.static("iconos"))
+app.use(fileUpload())
+
+const url = db_url
+const dbName = db_name
+
+const maxFavoritos = 7
+
+// socket
+// cuando los usuarios se conectan
+io.on("connection", (socket) => {
+    socket.on("connect_error", (err) => {
+        console.log(`connect_error due to ${err.message}`);
+    })
+    // Se envia un socket.id a la interfaz login
+    socket.emit("sesion-usuario", (socket.id))
+    // Genera la sesion del usuario cuando ingresa: su socket.id y id.usuario
+    socket.on("generar-sesion", async (usuarioId) => {
+        try {
+            const client = await MongoClient.connect(url)
+            const db = client.db(dbName)
+            await db.collection("sesiones").insertOne({ "id_sesion": socket.id, "id_usuario": usuarioId })
+        }
+        catch (error) {
+            console.log(error)
+        }
+    })
+    // entrar sala
+    socket.on("entrar-sala", async (idGrupo, idSesion) => {
+        try {
+            const client = await MongoClient.connect(url)
+            const db = client.db(dbName)
+            const sesion_usuario = await db.collection("sesiones").findOne({ id_sesion: idSesion })
+            if (sesion_usuario) {
+                const user = await db.collection("usuarios").findOne({ _id: new ObjectId(sesion_usuario.id_usuario) })
+                if (user) {
+                    socket.join(idGrupo)
+                    io.in(idGrupo).emit("update-grupo")
+                    const userGrupo = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo), usuarios_activos: { $elemMatch: { _id: new ObjectId(user._id) } } })
+                    // si no esta en el grupo agregarlo
+                    if (!userGrupo) {
+                        await db.collection("salas").updateOne(
+                            { _id: new ObjectId(idGrupo) },
+                            { $addToSet: { usuarios_activos: user } }
+                        )
+                        await db.collection("salas").updateOne(
+                            { _id: new ObjectId(idGrupo) },
+                            {
+                                $addToSet: {
+                                    recomendaciones_stack: {
+                                        id_usuario: sesion_usuario.id_usuario,
+                                        items: []
+                                    }
+                                }
+                            }
+                        )
+                        await db.collection("usuarios").updateOne(
+                            { _id: user._id },
+                            {
+                                $set: { idSalaActiva: idGrupo }
+                            }
+                        )
+                        LOG.info(`[JOIN-ROOM] Room ${idGrupo}: User ${sesion_usuario.id_usuario}`, systemLogEvent("room-join"))
+                        // añadir usuario a sala eventos
+                        const userEvento = await db.collection("salas_eventos").findOne({ id_sala: idGrupo, usuarios: { $elemMatch: { id_usuario: sesion_usuario.id_usuario } } })
+                        if (!userEvento) {
+                            await db.collection("salas_eventos").updateOne(
+                                { id_sala: idGrupo },
+                                {
+                                    $addToSet: {
+                                        usuarios: {
+                                            id_usuario: sesion_usuario.id_usuario,
+                                            score: {
+                                                vistos: 0,
+                                                recomendados: 0,
+                                                favoritos: 0,
+                                                escuchados: 0
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                            LOG.info(`[JOIN-EVENT-ROOM] Room ${idGrupo}: User ${sesion_usuario.id_usuario} was added to event room ${idGrupo}`, systemLogEvent("event-room-join"))
+                        }
+                    }
+                }
+            }
+        }
+        catch (error) {
+            console.log(error)
+        }
+    })
+    // salir sala
+    socket.on("salir-sala", async (idGrupo, idSesion) => {
+        try {
+            const salas_creadas = io.of("/").adapter.rooms
+            for (const [idSala, socket_sala_id] of salas_creadas) {
+                if (socket_sala_id.has(socket.id)) {
+                    socket.leave(idSala)
+                }
+            }
+            const client = await MongoClient.connect(url)
+            const db = client.db(dbName)
+            const sesion_usuario = await db.collection("sesiones").findOne({ id_sesion: idSesion })
+            if (sesion_usuario) {
+                const user = await db.collection("usuarios").findOne({ _id: new ObjectId(sesion_usuario.id_usuario) })
+                const userGrupo = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo), usuarios_activos: { $elemMatch: { _id: new ObjectId(user._id) } } })
+                if (userGrupo) {
+                    await db.collection("usuarios").updateOne(
+                        { _id: new ObjectId(sesion_usuario.id_usuario) },
+                        {
+                            $set: { idSalaActiva: "" }
+                        }
+                    )
+                    await db.collection("salas").updateOne(
+                        { _id: userGrupo._id },
+                        {
+                            $pull:
+                                { usuarios_activos: { _id: new ObjectId(user._id) } }
+                        }
+                    )
+                    LOG.info(`[EXIT-ROOM] Room ${userGrupo._id}: User ${user._id} has left the room`, systemLogEvent("exit-room"))
+                }
+            }
+            io.in(idGrupo).emit("update-grupo")
+        }
+        catch (error) {
+            console.log(error)
+        }
+    })
+
+    // entrar sala espera
+    socket.on("entrar-sala-espera", async (idSala, idSesion) => {
+        try {
+            const client = await MongoClient.connect(url)
+            const db = client.db(dbName)
+            const sesion_usuario = await db.collection("sesiones").findOne({ id_sesion: idSesion })
+            if (sesion_usuario) {
+                const user = await db.collection("usuarios").findOne({ _id: new ObjectId(sesion_usuario.id_usuario) })
+                if (user) {
+                    socket.join(idSala + "espera")
+                    io.in(idSala + "espera").emit("update-sala-espera")
+                    const userGrupo = await db.collection("salas").findOne({ _id: new ObjectId(idSala), sala_espera: { $elemMatch: { _id: new ObjectId(user._id) } } })
+                    // si no esta en el grupo agregarlo
+                    if (!userGrupo) {
+                        await db.collection("salas").updateOne(
+                            { _id: new ObjectId(idSala) },
+                            { $addToSet: { sala_espera: user } }
+                        )
+                        LOG.info(`[JOIN-WAITING-ROOM] Room: ${userGrupo._id}: User ${user._id} joinned waiting room`, systemLogEvent("waiting-room-join"))
+                    }
+                }
+            }
+        }
+        catch (error) {
+            console.log(error)
+        }
+    })
+
+    // si se desconecta el usuario
+    socket.on("disconnect", async () => {
+        try {
+            const salas_creadas = io.of("/").adapter.rooms
+            for (const [idSala, socket_sala_id] of salas_creadas) {
+                if (socket_sala_id.has(socket.id)) {
+                    socket.leave(idSala)
+                }
+            }
+            const client = await MongoClient.connect(url)
+            const db = client.db(dbName)
+            const sesion_usuario = await db.collection("sesiones").findOne({ id_sesion: socket.id })
+            if (sesion_usuario) {
+                const user = await db.collection("usuarios").findOne({ _id: new ObjectId(sesion_usuario.id_usuario) })
+                if (user !== null) {
+                    const idGrupo = user.idSalaActiva
+                    const userGrupo = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo), usuarios_activos: { $elemMatch: { _id: new ObjectId(user._id) } } })
+                    if (userGrupo) {
+                        await db.collection("salas").updateOne(
+                            { _id: userGrupo._id },
+                            {
+                                $pull:
+                                    { usuarios_activos: { _id: new ObjectId(user._id) } }
+                            }
+                        )
+                        await db.collection("usuarios").updateOne(
+                            { _id: new ObjectId(sesion_usuario.id_usuario) },
+                            {
+                                $set: { idSalaActiva: "" }
+                            }
+                        )
+                        LOG.info(`[DISCONNECT] User ${user._id} disconnected`, systemLogEvent("disconnect"))
+                    }
+                }
+            }
+
+        }
+        catch (error) {
+            console.log(error)
+        }
+    })
+    // cambiar de pagina y mostrar item final
+    socket.on("solicitar-pagina-final", (idSala) => {
+        io.in(idSala + "espera").emit("mostrar-pagina-final")
+    })
+
+    // recomendaciones
+    socket.on("enviar-grupo-recomendaciones", (idGrupo, recomendaciones) => {
+        io.in(idGrupo).emit("mostrar-grupo-recomendaciones", recomendaciones)
+    })
+
+    socket.on("cargando-enviar", (idGrupo, valor) => {
+        io.in(idGrupo).emit("cargando", valor)
+    })
+
+    socket.on("chat-enviar-mensaje", (idGrupo) => {
+        io.in(idGrupo).emit("chat-desplegar-mensajes")
+    })
+
+    // favoritos
+    socket.on("enviar-a-favoritos", (idGrupo) => {
+        io.in(idGrupo + "favoritos").emit("obtener-favoritos")
+    })
+    socket.on("entrar-panel-favoritos", (idGrupo) => {
+        socket.join(idGrupo + "favoritos")
+    })
+    socket.on("eliminar-favorito-grupo", async (idGrupo, idItem, idUsuario) => {
+        try {
+            const client = await MongoClient.connect(url)
+            const db = client.db(dbName)
+            await db.collection("salas").updateOne(
+                {
+                    _id: new ObjectId(idGrupo)
+                },
+                {
+                    $pull: {
+                        "recomendaciones_favoritos": {
+                            idItem: idItem
+                        }
+                    }
+                }
+            )
+            client.close()
+            LOG.info(`[FAVORITES] User ${idUsuario} removed itemId: ${idItem} from room ${idGrupo} favorites`, systemLogEvent("remove-favorites"))
+            io.in(idGrupo + "favoritos").emit("obtener-favoritos")
+        }
+        catch (error) {
+            console.log(error)
+        }
+    })
+    socket.on("calificar-favorito-grupo", async (idGrupo) => {
+        io.in(idGrupo + "favoritos").emit("obtener-favoritos")
+    })
+
+})
+
+//apis
+app.post("/registrar-usuario", async (req, res) => {
+    if (!req.files || !req.files.imagen_usuario) {
+        res.status(400).json({ error: 'No file uploaded' })
+        return
+    }
+    const image = req.files.imagen_usuario
+    const uploadDirectory = dir_icons_users
+    const filePath = uploadDirectory + "/" + image.name;
+    image.mv(filePath, async (err) => {
+        if (err) {
+            console.error(err)
+            res.status(500).json({ error: 'Failed to upload file' })
+        } else {
+            let usuario = {
+                usuario: req.body.usuario,
+                nombre: req.body.nombre,
+                edad: req.body.edad,
+                educacion: req.body.educacion,
+                password: req.body.password,
+                recomendaciones: [],
+                librec_rec: {},
+                imagen_usuario: "http://" + server_ip + ":" + server_port + dir_icons + "/" + image.name,
+                calificaciones: [],
+                idSalaActiva: ""
+            }
+            try {
+                const client = await MongoClient.connect(url)
+                const db = client.db(dbName)
+                const insertedUser = await db.collection("usuarios").insertOne(usuario)
+                LOG.info(`[REGISTER] User ${usuario.nombre} was created`, systemLogEvent("register"))
+
+                const bob = await db.collection("usuarios").findOne({ "usuario": "bob" });
+                const alice = await db.collection("usuarios").findOne({ "usuario": "alice" });
+
+                if (bob && alice){
+                    let idSala = new ObjectId()
+                    let trainning_room = {
+                        _id: idSala,
+                        id_sala: idSala,
+                        tipo: "train",
+                        titulo: "Trainning room",
+                        descripcion: "Trainning room",
+                        lider: req.body.usuario,
+                        liderId: insertedUser.insertedId,
+                        usuarios_activos: [ bob, alice ],
+                        chat: [],
+                        max_users: "3",
+                        recomendaciones_grupal: [],
+                        recomendaciones_individual: [],
+                        recomendaciones_stack: [],
+                        recomendaciones_favoritos: [],
+                        librec_rec: {},
+                    }
+                    await db.collection("salas").insertOne(trainning_room)
+                    LOG.info(`[TRAINNING-ROOM] Trainning room created for user ${usuario.nombre}`, systemLogEvent("trainning-room"))
+                    let sala_eventos = {
+                        id_sala: idSala.toString(),
+                        usuarios: []
+                    }
+                    await db.collection("salas_eventos").insertOne(sala_eventos)
+                    LOG.info(`[CREATE-EVENT-ROOM] Event room ${sala_eventos.id_sala} created by ${usuario.nombre}`, systemLogEvent("create-room"))
+            
+                }
+                client.close()
+            }
+            catch (error) {
+                console.log(error)
+            }
+        }
+
+        return res.json(req.body)
+    })
+})
+
+app.get("/obtener-sesion-usuario", async (req, res) => {
+    try {
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+        const usuario_sesion = await db.collection("sesiones").findOne({ "id_usuario": req.query.idUsuario });
+        client.close()
+        if (usuario_sesion) {
+            return res.json({
+                "idSesion": usuario_sesion.id_sesion
+            })
+        }
+        return res.json({ error: "usuario sin sesion" })
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.post("/login-usuario", async (req, res) => {
+    try {
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+        const usuario = await db.collection("usuarios").findOne({ "usuario": req.body.usuario });
+        client.close();
+        let test
+        if (usuario) {
+            if (usuario.password === req.body.password) {
+                const personalidad = await db.collection("personalidades").findOne({ idUsuario: usuario._id.toString() })
+                if (personalidad === null) {
+                    test = "si"
+                }
+                else {
+                    test = "no"
+                }
+
+                LOG.info(`[LOGIN] User ${usuario._id} logged in`, systemLogEvent("login"))
+                return res.json({ "respuesta": "ingreso", "usuario_id": usuario._id.toString(), "test": test })
+            }
+            else {
+                LOG.info(`[LOGIN] User ${usuario._id} failed to log in`, systemLogEvent("login"))
+                return res.json("error")
+            }
+        }
+    }
+    catch (error) {
+        return res.json(error)
+    }
+
+    LOG.info(`[LOGIN] User not found`, systemLogEvent("login"))
+    return res.json("no se encontro el usuario o contraseña equivocada")
+})
+
+app.post("/login", async (req, res) => {
+    try {
+        var n_usuario = 6041
+        let n_usuarios = []
+
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+        const usuarios = await db.collection("sala").find({}).toArray();
+        usuarios.forEach(async (documento) => {
+            n_usuarios.push(parseInt(documento.numero_usuario))
+        })
+
+        for (let i = 0; i <= n_usuarios.length; i++) {
+            if (!n_usuarios.includes(n_usuario)) {
+                await db.collection("sala").insertOne({
+                    nombre: req.body.nombre,
+                    id_sesion: req.body.id_sesion,
+                    imagen_path: req.body.imagen,
+                    numero_usuario: n_usuario
+                });
+                break
+            }
+            n_usuario++
+        }
+        client.close();
+    }
+    catch (error) {
+        console.log(error)
+    }
+    return res.json(req.body)
+})
+
+// Crear sala
+app.post("/crear-sala", async (req, res) => {
+    let idSalaEventos = new ObjectId()
+    let sala = {
+        _id: idSalaEventos,
+        id_sala: req.body.id_sala,
+        titulo: req.body.titulo,
+        tipo: "normal",
+        estado: "open",
+        descripcion: req.body.descripcion,
+        lider: req.body.lider,
+        usuarios_activos: [],
+        chat: [],
+        max_users: req.body.maxUsers,
+        recomendaciones_grupal: [],
+        recomendaciones_individual: [],
+        recomendaciones_stack: [],
+        recomendaciones_favoritos: [],
+        sala_espera: [],
+        sala_eventos_id: idSalaEventos.toString(),
+        librec_rec: {}
+    }
+    let sala_eventos = {
+        id_sala: idSalaEventos.toString(),
+        usuarios: []
+    }
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        await db.collection("salas").insertOne(sala)
+        LOG.info(`[CREATE-ROOM] Room ${sala._id} created by ${req.body.lider}`, systemLogEvent("create-room"))
+        await db.collection("salas_eventos").insertOne(sala_eventos)
+        LOG.info(`[CREATE-EVENT-ROOM] Event room ${sala_eventos.id_sala} created by ${req.body.lider}`, systemLogEvent("create-room"))
+        client.close()
+        return res.json("ok")
+    }
+    catch (error) {
+        return res.json("not ok")
+    }
+})
+
+// Obtener salas
+app.get("/obtener-salas", async (req, res) => {
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const salas = await db.collection("salas").find({}).toArray()
+        const salasDisponibles = []
+        salas.forEach((sala) => {
+            if (sala.tipo !== "train" || sala.tipo === undefined){
+                const users = []
+                sala.usuarios_activos.forEach((user) => {
+                    users.push(user._id)
+                })
+                const struct_sala = {
+                    _id: sala._id,
+                    id_sala: sala.id_sala,
+                    titulo: sala.titulo,
+                    descripcion: sala.descripcion,
+                    lider: sala.lider,
+                    usuarios_activos: users,
+                    max_users: sala.max_users,
+                    estado: sala.estado
+                }
+                salasDisponibles.push(struct_sala)
+            }
+        })
+        client.close()
+        return res.json(salasDisponibles)
+    }
+    catch (error) {
+        console.log(error)
+        return res.json("error")
+    }
+})
+
+app.get("/check-sala-estado", async (req, res) => {
+    try{
+        const idGrupo = req.query.idSala
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        client.close()
+        const estados = {
+            full: false,
+            open: false,
+            closed: false
+        }
+        if (sala){
+            if (sala.usuarios_activos.length >= parseInt(sala.max_users)) {
+                estados.full = true
+            }
+            const salaEstado = sala.estado
+            if (salaEstado === "open"){
+                estados.open = true
+            }
+            else if (salaEstado === "closed"){
+                estados.closed = true
+            }
+        }
+        if (estados.full && estados.open && !estados.closed){
+            return res.json({
+                resp: "full-open"
+            })
+        }
+        else if (estados.full && !estados.open && estados.closed){
+            return res.json({
+                resp: "full-closed"
+            })
+        }
+        else if (!estados.full && !estados.open && estados.closed){
+            return res.json({
+                resp: "closed"
+            })
+        }
+        else if (!estados.full && estados.open && !estados.closed){
+            return res.json({
+                resp: "open"
+            })
+        }
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+app.get("/check-sala-espacio-disponible", async (req, res) => {
+    try {
+        const idGrupo = req.query.idSala
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        client.close()
+        if (sala.usuarios_activos.length < parseInt(sala.max_users)) {
+            return res.json({
+                "enter": true
+            })
+        }
+        else{
+            return res.json({
+                "enter": false
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+// Check if a document exists in a collection
+app.get("/check-usuario", async (req, res) => {
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("sala").findOne({ _id: req.body.id_sesion })
+        client.close()
+        if (usuario) {
+            return res.json({
+                "existe": true
+            });
+        } else {
+            return res.json({
+                "existe": false
+            });
+        }
+    } catch (error) {
+        console.log(error);
+    }
+})
+
+app.post("/cambiar-estado-sala", async (req, res) => {
+    try{
+        const idGrupo = req.body.idGrupo
+        const estado = req.body.nuevoEstado
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        let cambiado = false
+        if (sala.estado !== estado){
+            await db.collection("salas").updateOne(
+                { _id: new ObjectId(idGrupo) },
+                {
+                    $set: { estado: estado }
+                }
+            )
+            cambiado = true
+        }
+        client.close()
+        if (cambiado) {
+            return res.json({
+                resp: "ok",
+            })
+        }
+        return res.json({
+            resp: "error",
+            error: "same room state"
+        })
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+app.get("/obtener-sala", async (req, res) => {
+    try {
+        const idGrupo = req.query.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        client.close()
+        if (sala) {
+            return res.json(sala)
+        }
+        return res.json(null)
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/obtener-sala-trainning", async (req, res) => {
+    try {
+        const idUsuario = req.query.idUsuario
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ liderId: new ObjectId(idUsuario), tipo: "train" })
+        client.close()
+        if (sala) {
+            return res.json(sala)
+        }
+        return res.json(null)
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/check-sala-espera", async(req, res) => {
+    try{
+        const idGrupo = req.query.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        client.close()
+        if (sala) {
+            if (sala.usuarios_activos.length === 0 && sala.sala_espera.length === 0){
+                return res.json({
+                    resp: false,
+                    msg: "both empty"
+                })
+            }
+            const ids1 = sala.usuarios_activos.map(obj => obj._id.toString());
+            const ids2 = sala.sala_espera.map(obj => obj._id.toString());
+            // Check if every user is in waiting room
+            const result = ids1.every(id => ids2.includes(id));
+            if (result){
+                return res.json({
+                    resp: true,
+                    msg: "all users ready"
+                })
+            }
+            return res.json({
+                resp: false,
+                msg: "users missing in waiting room" 
+            })
+        }
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+app.get("/obtener-sala-espera", async (req, res) => {
+    try {
+        const idGrupo = req.query.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        client.close()
+        if (sala) {
+            const usuario = await db.collection("usuarios").findOne({ usuario: sala.lider })
+            if (usuario) {
+
+                const user_data = {
+                    _id: usuario._id,
+                    usuario: usuario.usuario,
+                }
+
+                const salaActiva = []
+                const salaEspera = []
+                const sala_lider = sala.lider
+
+                sala.usuarios_activos.forEach((user, i) => {
+                    salaActiva[i] = {
+                        _id: user._id,
+                        usuario: user.usuario,
+                        imagen_usuario: user.imagen_usuario,
+                        idSalaActiva: user.idSalaActiva
+                    }
+                })
+
+                sala.sala_espera.forEach((user, i) => {
+                    salaEspera[i] = {
+                        _id: user._id,
+                        usuario: user.usuario,
+                        imagen_usuario: user.imagen_usuario,
+                        idSalaActiva: user.idSalaActiva
+                    }
+                })
+
+                const resp = {
+                    salaEspera: salaEspera,
+                    salaActiva: salaActiva,
+                    user: user_data
+                }
+
+                return res.json(resp)
+            }
+        }
+        return res.json(null)
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+
+app.get("/obtener-sala-lider", async (req, res) => {
+    try {
+        const idGrupo = req.query.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        client.close()
+        if (sala) {
+            const lider_sala = sala.lider
+            const usuario = await db.collection("usuarios").findOne({ usuario: sala.lider })
+            if (usuario) {
+                const user_data = {
+                    _id: usuario._id,
+                    usuario: usuario.usuario,
+                }
+                const resp = {
+                    lider: lider_sala,
+                    user: user_data,
+                    titulo: sala.titulo
+                }
+                return res.json(resp)
+            }
+        }
+        return res.json(null)
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+// Obtener un usuario segun id
+app.get("/obtener-usuario", async (req, res) => {
+    try {
+        const id_usuario = req.query.idUsuario
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(id_usuario) })
+        client.close()
+        if (usuario) {
+            return res.json(usuario)
+        }
+        return res.json(null)
+    } catch (error) {
+        console.log(error)
+    }
+})
+
+// Obtener nombre usuario
+app.get("/obtener-usuario-nombre", async (req, res) => {
+    try {
+        const id_usuario = req.query.idUsuario
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(id_usuario) })
+        client.close()
+        if (usuario) {
+            return res.json(
+                { usuario: usuario.usuario }
+            )
+        }
+        return res.json(null)
+    } catch (error) {
+        console.log(error)
+    }
+})
+
+// Retrieve all documents from a collection
+app.get("/obtener-usuarios", async (req, res) => {
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuarios = await db.collection("sala").find({}).toArray()
+        let resp = {}
+        usuarios.forEach((doc) => {
+            resp[String(doc._id)] = doc
+        })
+        client.close()
+        return res.json(resp)
+    } catch (error) {
+        console.log(error)
+    }
+});
+
+// Obtener usuarios del grupo
+app.get("/obtener-usuarios-grupo", async (req, res) => {
+    try {
+        const idSala = req.query.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idSala) })
+        client.close()
+        if (sala) {
+            const usuarios = []
+            sala.usuarios_activos.forEach((user, i) => {
+                usuarios[i] = {
+                    _id: user._id,
+                    usuario: user.usuario,
+                    imagen_usuario: user.imagen_usuario,
+                    idSalaActiva: user.idSalaActiva
+                }
+            })
+            return res.json(usuarios)
+        }
+        return res.json(null)
+    }
+    catch (error) {
+        console.log(error)
+        return res.json(null)
+    }
+})
+
+// Obtener chat sala
+app.get("/obtener-chat-grupo", async (req, res) => {
+    try {
+        const idSala = req.query.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idSala) })
+        client.close()
+        if (sala) {
+            return res.json(sala.chat)
+        }
+        return res.json(null)
+    }
+    catch (error) {
+        console.log(error)
+        return res.json(null)
+    }
+})
+
+// Obtener ultimo mensaje chat sala
+app.get("/obtener-ultimo-mensaje-chat", async (req, res) => {
+    try {
+        const idSala = req.query.idGrupo;
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idSala) });
+        client.close();
+
+        if (sala) {
+            sala.chat.sort((a, b) => b.timestamp - a.timestamp);
+
+            if (sala.chat.length > 0) {
+                const latestMessage = sala.chat[0];
+                return res.json(latestMessage);
+            } else {
+                return res.json(null);
+            }
+        }
+        return res.json(null);
+    } catch (error) {
+        console.error(error);
+        return res.json(null);
+    }
+})
+
+// Enviar mensaje chat
+app.post("/enviar-mensaje-chat", async (req, res) => {
+    try {
+        const idSala = req.body.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const n_usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(req.body.id_usuario) })
+        if (n_usuario) {
+            let info_mensaje = {}
+            if (req.body.tipo_mensaje === "texto") {
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    "texto": req.body.texto,
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "texto"
+                }
+                LOG.info(`[CHAT] Room: ${idSala} User ${n_usuario.usuario} ${n_usuario._id} sent a message: ${req.body.texto}`, systemLogEvent("chat"))
+            }
+            else if (req.body.tipo_mensaje === "item") {
+                let path_imagen = dir_dataset_images + "/" + String(req.body.itemId) + ".jpg"
+                if (fs.existsSync(path_imagen)) {
+                    path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(req.body.itemId) + ".jpg"
+                }
+                else {
+                    path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+                }
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    "texto": req.body.texto,
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "item",
+                    "pathItem": path_imagen,
+                    "idItem": req.body.itemId
+                }
+            }
+            else if (req.body.tipo_mensaje === "ingreso_sala") {
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    "texto": req.body.texto,
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "ingreso_sala"
+                }
+            }
+            else if (req.body.tipo_mensaje === "salir_sala") {
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    "texto": req.body.texto,
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "salir_sala"
+                }
+            }
+            else if (req.body.tipo_mensaje === "sala_espera") {
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    "texto": req.body.texto,
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "sala_espera"
+                }
+            }
+            else if (req.body.tipo_mensaje === "rec_usuario") {
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    item: req.body.item,
+                    "texto": "El usuario " + n_usuario.usuario + " te ha recomendado ",
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "rec_usuario",
+                    "usuarioDestinoID": req.body.usuarioDestinoID,
+                    "usuarioDestino": req.body.usuarioDestino
+                }
+            }
+            else if (req.body.tipo_mensaje === "rec_grupal") {
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    item: req.body.item,
+                    "texto": "El usuario " + n_usuario.usuario + " recomienda  ",
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "rec_grupal",
+                    "grupoDestino": req.body.grupoDestino
+                }
+            }
+            else if (req.body.tipo_mensaje === "enviar_favoritos") {
+                const item = await db.collection("tracks").findOne({ item_id: parseInt(req.body.itemId) })
+                let path_imagen = dir_dataset_images + "/" + String(item.artist_id) + ".jpg"
+                if (fs.existsSync(path_imagen)) {
+                    path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(item.artist_id) + ".jpg"
+                }
+                else {
+                    path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+                }
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    item: {
+                        idGrupo: idSala,
+                        idItem: item.item_id,
+                        id_autor: item.artist_id,
+                        nombreItem: item.track_name,
+                        nombre_autor: item.artist_name,
+                        tipoItem: item.track_category,
+                        url_item: item.track_url,
+                        url_autor: item.artist_url,
+                        origin_autor: item.artist_country,
+                        continent_autor: item.artist_continent,
+                        pathItem: path_imagen
+                    },
+                    "texto": "El usuario " + n_usuario.usuario + " añadió a favoritos",
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "enviar_favoritos",
+                }
+            }
+            else if (req.body.tipo_mensaje === "eliminar_favoritos") {
+                const item = await db.collection("tracks").findOne({ item_id: parseInt(req.body.itemId) })
+                let path_imagen = dir_dataset_images + "/" + String(item.artist_id) + ".jpg"
+                if (fs.existsSync(path_imagen)) {
+                    path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(item.artist_id) + ".jpg"
+                }
+                else {
+                    path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+                }
+                info_mensaje = {
+                    "id_usuario": req.body.id_usuario,
+                    "usuario": n_usuario.usuario,
+                    item: {
+                        idGrupo: idSala,
+                        idItem: item.item_id,
+                        id_autor: item.artist_id,
+                        nombreItem: item.track_name,
+                        nombre_autor: item.artist_name,
+                        tipoItem: item.track_category,
+                        url_item: item.track_url,
+                        url_autor: item.artist_url,
+                        origin_autor: item.artist_country,
+                        continent_autor: item.artist_continent,
+                        pathItem: path_imagen
+                    },
+                    "texto": "El usuario " + n_usuario.usuario + " quitó de favoritos",
+                    "timestamp": req.body.timestamp,
+                    "tipo_mensaje": "eliminar_favoritos",
+                }
+            }
+            const nuevo_mensaje = await db.collection("salas").updateOne(
+                { _id: new ObjectId(idSala) },
+                { $push: { chat: info_mensaje } }
+            )
+            client.close()
+            if (nuevo_mensaje) {
+                return res.json("mensaje enviado")
+            }
+        }
+        return res.json(null)
+    }
+    catch (error) {
+        console.log(error)
+        return res.json(null)
+    }
+})
+
+app.get("/ejecutar-recomendacion-individualv2", async (req, res) => {
+    const idUsuario = req.query.idUsuario
+    const idGrupo = req.query.idGrupo
+    try {
+        LOG.info(`[INDIVIDUAL-RECOMMENDATION] Room: ${idGrupo}: User ${idUsuario} has started individual recommendation`, systemLogEvent("individual-rec"))
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(idUsuario) })
+        if (usuario) {
+            // fecha recomendacion
+            const tiempo_actual = Date.now()
+
+            // crear directorio del usuario si no existe /recomendaciones/usuarios/id
+            const directorioUsuario = dir_recommendations_users + "/" + idUsuario
+            // /recomendaciones/usuarios/id/data
+            const directorioDataUsuario = directorioUsuario + "/data"
+
+            if (!fs.existsSync(directorioUsuario)) {
+                fs.mkdirSync(directorioUsuario)
+            }
+            if (!fs.existsSync(directorioDataUsuario)) {
+                fs.mkdirSync(directorioDataUsuario)
+            }
+            //const userData = directorioDataUsuario + "/user_data"
+
+            // /recomendaciones/usuarios/id/data/users_data
+            const userData = directorioDataUsuario + "/users_data"
+
+            fs.writeFileSync(userData, '')
+
+            // añadir calificaciones de usuario al dataset
+            usuario.calificaciones.forEach((item) => {
+                var linea = item.linea
+                fs.appendFileSync(userData, linea)
+            })
+
+            // crear y/o reiniciar properties de la sala
+            const directorioUsuarioProperties = directorioUsuario + "/user.properties"
+            fs.copyFileSync(user_recomendations_properties, directorioUsuarioProperties)
+
+            // agregar propiedades a las propiedades del grupo
+            const semilla = String(8348)
+            const recommenderAlgo = "biasedmf"
+            const directorioResultado = recommendations_results_users + "/" + idGrupo 
+
+            if (!fs.existsSync(directorioResultado)){
+                fs.mkdirSync(directorioResultado)
+            }
+
+            if (!fs.existsSync(directorioResultado+"/"+idUsuario)){
+                fs.mkdirSync(directorioResultado+"/"+idUsuario)
+            }
+
+            const dataInputPathName = "users_data"
+            fs.appendFileSync(directorioUsuarioProperties, "\nrec.random.seed=" + semilla + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "rec.recommender.class=" + recommenderAlgo + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "dfs.data.dir=" + directorioDataUsuario + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "data.input.path=" + dataInputPathName + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "user.id=" + idUsuario +"\n")
+            fs.appendFileSync(directorioUsuarioProperties, "show.dataset.ratings=false" + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "show.individual.ratings=true" + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "dfs.result.dir=" + directorioResultado)
+
+            // ejectuar grouplibrec
+            const args = ["-jar", exec_librec, "individual", directorioUsuarioProperties, dir_individual_datamodel, dir_individual_basemodel]
+            const grouplibrec = spawn("java", args)
+            grouplibrec.on("close", async (code) => {
+                if (code === 0) {
+                    // devolver items recomendados para el grupo
+                    console.log(`exit success: ${code}`)
+                    const directorioResultadosSala = recommendations_results_users + "/" + idGrupo + "/" + idUsuario + "/"
+                    let items = []
+                    const recomendaciones = fs.readdirSync(directorioResultadosSala)
+                    //const directorioUltimaRecomendacion = recomendaciones.sort()[recomendaciones.length - 1]
+
+                    const currentTimestamp = Date.now();
+                    const differences = recomendaciones.map(millisecond => Math.abs(parseInt(millisecond) - currentTimestamp));
+                    const closestIndex = differences.indexOf(Math.min(...differences));
+                    const directorioUltimaRecomendacion = recomendaciones[closestIndex];
+
+                    let trecomendaciones = fs.readFileSync(directorioResultadosSala + directorioUltimaRecomendacion + "/recommendations.txt", "utf-8")
+                    let arrayRecomendaciones = trecomendaciones.split("\n")
+
+                    //var data2 = fs.readFileSync(dir_tracks_data, "utf-8")
+                    //data2 = data2.split("\n")
+                    let max_recommend = 2
+                    let usuario_rec = usuario.librec_rec
+                    let count_item = 0
+                    for (let i = 0; i < arrayRecomendaciones.length - 1; i++) {
+                        if (count_item === 5){
+                            break
+                        }
+                        if(arrayRecomendaciones[i] === ''){
+                            continue
+                        }
+
+                        let recomendacion = arrayRecomendaciones[i].split(",");
+                        let grupo = recomendacion[0];
+                        let item = parseInt(recomendacion[1]);
+                        let rating_individual = recomendacion[2];
+
+                        let found_item = await db.collection("tracks").findOne({ item_id: parseInt(item) })
+                        if(found_item === null || found_item.item_id === null){
+                            continue
+                        }
+
+                        if (usuario_rec[item] === undefined){
+                            usuario_rec[item] = 1
+                            await db.collection("usuarios").updateOne(
+                                { _id: new ObjectId(idUsuario) },
+                                { $set: { librec_rec: usuario_rec }}
+                                )
+                        }
+                        else{
+                            usuario_rec[item] += 1
+                            await db.collection("usuarios").updateOne(
+                                { _id: new ObjectId(idUsuario) },
+                                { $set: { librec_rec: usuario_rec }}
+                                )
+                            if (usuario_rec[item] >= max_recommend){
+                                continue
+                            }
+                        }
+                        count_item+=1
+
+                        let trackItemId = found_item.item_id
+                        let nombreItem = found_item.track_name
+                        let tipoItem = found_item.track_category
+                        let url_item = found_item.track_url
+                        let idAutor = found_item.artist_id
+                        let nombreAutor = found_item.artist_name
+                        let urlAutor = found_item.artist_url
+                        let originAutor = found_item.artist_country
+                        let continentAutor = found_item.artist_continent
+
+                        let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg";
+                        if (fs.existsSync(path_imagen)) {
+                            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg";
+                        } else {
+                            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png";
+                        }
+                        items.push({
+                            idItem: String(item),
+                            rating: rating_individual,
+                            pathImagen: path_imagen,
+                            pathItem: path_imagen,
+                            nombreItem: nombreItem,
+                            tipoItem: tipoItem,
+                            url_item: url_item,
+                            id_autor: idAutor,
+                            nombre_autor: nombreAutor,
+                            url_autor: urlAutor,
+                            origin_autor: originAutor,
+                            continent_autor: continentAutor,
+                        });
+                    }
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("usuarios").updateOne(
+                        { _id: new ObjectId(idUsuario) },
+                        {
+                            $push:
+                            {
+                                recomendaciones:
+                                    { idSala: idGrupo, time: tiempo_actual, items: items_ordenados }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+                else {
+                    console.log(`exit error: ${code}`)
+                }
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/ejecutar-recomendacion-grupalv2", async (req, res) => {
+    const idSala = req.query.idGrupo
+    try {
+
+        LOG.info(`[GROUP-RECOMMENDATION] Room ${idSala}: Group Recommendation has started`, systemLogEvent("group-rec"))
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idSala) })
+        const groupUsers = []
+        if (sala) {
+            // fecha recomendacion
+            const tiempo_actual = Date.now()
+
+            // crear directorio del grupo si no existe
+            const directorioGrupo = dir_recommendations_rooms + "/" + idSala
+            const directorioDataGrupo = directorioGrupo + "/data"
+
+            if (!fs.existsSync(directorioGrupo)) {
+                fs.mkdirSync(directorioGrupo)
+            }
+            if (!fs.existsSync(directorioDataGrupo)) {
+                fs.mkdirSync(directorioDataGrupo)
+            }
+            //const usersDataGroup = directorioDataGrupo + "/users_data"
+            const usersDataGroup = directorioDataGrupo + "/users_data"
+
+            fs.writeFileSync(usersDataGroup, '')
+
+            // añadir calificaciones de usuarios al dataset
+            sala.usuarios_activos.forEach(async (usuario) => {
+                groupUsers.push(usuario._id.toString())
+                const user = await db.collection("usuarios").findOne({ _id: new ObjectId(usuario._id.toString()) })
+                user.calificaciones.forEach((calificacion) => {
+                    var idItem = calificacion.id_item
+                    var linea = calificacion.linea
+                    fs.appendFileSync(usersDataGroup, linea)
+                })
+            })
+
+            // crear y/o reiniciar properties de la sala
+            const directorioProperties = directorioGrupo + "/group.properties"
+            fs.copyFileSync(group_recomendations_properties, directorioProperties)
+    
+            let groupSimilarSize = groupUsers.length
+            let groupModelPath
+            let groupDataModelPath
+
+            if (groupSimilarSize <= 1 || groupSimilarSize >= 5){
+                return res.json({
+                    "resp": "group size must be 2, 3 or 4"
+                })
+            }
+
+            if (groupSimilarSize === 2){
+                groupModelPath = dir_group_size_2_basemodel
+                groupDataModelPath = dir_group_size_2_datamodel
+            }
+            else if(groupSimilarSize === 3){
+                groupModelPath = dir_group_size_3_basemodel
+                groupDataModelPath = dir_group_size_3_datamodel
+            }
+            else if(groupSimilarSize === 4){
+                groupModelPath = dir_group_size_4_basemodel
+                groupDataModelPath = dir_group_size_4_datamodel
+            }
+
+            let group_ids = groupUsers.join(",")
+
+
+            // agregar propiedades a las propiedades del grupo
+            const semilla = String(647483) + "\n"
+            const recommenderAlgo = "biasedmf"
+            const directorioData = usersDataGroup 
+            const directorioResultado = dir_recommendations_results 
+            const dataInputPathName = "users_data" 
+            fs.appendFileSync(directorioProperties, "\nrec.random.seed=" + semilla + "\n")
+            fs.appendFileSync(directorioProperties, "group.base.recommender.class=" + recommenderAlgo + "\n")
+            fs.appendFileSync(directorioProperties, "dfs.data.dir=" + directorioDataGrupo + "\n")
+            fs.appendFileSync(directorioProperties, "group.similar.groupSize=" + String(groupSimilarSize) +"\n")
+            fs.appendFileSync(directorioProperties, "data.input.group.path=" + dataInputPathName +"\n")
+            fs.appendFileSync(directorioProperties, "group.new=true" + "\n")
+            fs.appendFileSync(directorioProperties, "group.users.ids="+ group_ids + "\n")
+            fs.appendFileSync(directorioProperties, "group.id="+ idSala + "\n")
+            fs.appendFileSync(directorioProperties, "show.group.ratings=true" + "\n")
+
+            fs.appendFileSync(directorioProperties, "dfs.result.dir=" + directorioResultado +"\n")
+
+            // ejectuar grouplibrec
+            const args = ["-jar", exec_librec, "group", directorioProperties, groupDataModelPath, groupModelPath ]
+            //const javaVersionPath = "/home/asmith/java/java-11-openjdk-amd64/bin/java"
+            const grouplibrec = spawn("java", args)
+            grouplibrec.on("close", async (code) => {
+                if (code === 0) {
+                    // devolver items recomendados para el grupo
+                    console.log(`exit success: ${code}`)
+                    const directorioResultadosSala = dir_recommendations_results + "/" + idSala + "/"
+                    let items = []
+                    const recomendaciones = fs.readdirSync(directorioResultadosSala)
+                    const directorioUltimaRecomendacion = recomendaciones.sort()[recomendaciones.length - 1]
+                    let trecomendaciones = fs.readFileSync(directorioResultadosSala + directorioUltimaRecomendacion + "/recommendations.txt", "utf-8")
+                    let arrayRecomendaciones = trecomendaciones.split("\n")
+
+                    let max_recommend = 2
+                    let grupo_rec = sala.librec_rec
+                    let count_item = 0
+
+                    for (let i = 0; i < arrayRecomendaciones.length - 1; i++) {
+                        if (count_item === 5){
+                            break
+                        }
+                        if(arrayRecomendaciones[i] === ''){
+                            continue
+                        }
+                        let recomendacion = arrayRecomendaciones[i].split(",")
+                        let grupo = recomendacion[0]
+                        let item = recomendacion[1]
+                        let rating_grupo = recomendacion[2]
+                        if (item) {
+                            let found_item = await db.collection("tracks").findOne({ item_id: parseInt(item) })
+                            if(found_item === null || found_item.item_id === null){
+                                continue
+                            }
+
+                            if (grupo_rec[item] === undefined){
+                                grupo_rec[item] = 1
+                                await db.collection("salas").updateOne(
+                                    { _id: new ObjectId(idSala) },
+                                    { $set: { librec_rec: grupo_rec }}
+                                    )
+                            }
+                            else{
+                                grupo_rec[item] += 1
+                                await db.collection("salas").updateOne(
+                                    { _id: new ObjectId(idSala) },
+                                    { $set: { librec_rec: grupo_rec }}
+                                    )
+                                if (grupo_rec[item] >= max_recommend){
+                                    continue
+                                }
+                            }
+                            count_item+=1
+
+                            let trackItemId = found_item.item_id
+                            let nombreItem = found_item.track_name
+                            let tipoItem = found_item.track_category
+                            let url_item = found_item.track_url
+                            let idAutor = found_item.artist_id
+                            let nombreAutor = found_item.artist_name
+                            let urlAutor = found_item.artist_url
+                            let originAutor = found_item.artist_country
+                            let continentAutor = found_item.artist_continent
+
+                            let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+                            if (fs.existsSync(path_imagen)) {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+                            }
+                            else {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+                            }
+
+                            items.push({
+                                idGrupo: grupo,
+                                idItem: item,
+                                rating: rating_grupo,
+                                pathImagen: path_imagen,
+                                pathItem: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                url_item: url_item,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                            })
+                        }
+                    }
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("salas").updateOne(
+                        { _id: new ObjectId(idSala) },
+                        {
+                            $addToSet: {
+                                recomendaciones_grupal: {
+                                    time: tiempo_actual,
+                                    items: items_ordenados
+                                }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+                else {
+                    console.log(`exit error: ${code}`)
+                }
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/ejecutar-recomendacion-individual", async (req, res) => {
+    const idUsuario = req.query.idUsuario
+    const idGrupo = req.query.idGrupo
+    try {
+        LOG.info(`[INDIVIDUAL-RECOMMENDATION] Room: ${idGrupo}: User ${idUsuario} has started individual recommendation`, systemLogEvent("individual-rec"))
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(idUsuario) })
+        if (usuario) {
+            // fecha recomendacion
+            const tiempo_actual = Date.now()
+
+            // crear directorio del usuario si no existe /recomendaciones/usuarios/id
+            const directorioUsuario = dir_recommendations_users + "/" + idUsuario
+            // /recomendaciones/usuarios/id/data
+            const directorioDataUsuario = directorioUsuario + "/data"
+
+            if (!fs.existsSync(directorioUsuario)) {
+                fs.mkdirSync(directorioUsuario)
+            }
+            if (!fs.existsSync(directorioDataUsuario)) {
+                fs.mkdirSync(directorioDataUsuario)
+            }
+            //const userData = directorioDataUsuario + "/user_data"
+
+            // /recomendaciones/usuarios/data/users_data
+            const userData = directorioDataUsuario + "/users_data"
+
+            // crear y/o reiniciar dataset del usuario
+            fs.copyFileSync(dir_recommendations_dataset_users, userData)
+
+            // añadir calificaciones de usuario al dataset
+            usuario.calificaciones.forEach((item) => {
+                var linea = item.linea
+                fs.appendFileSync(userData, linea)
+            })
+
+            // crear y/o reiniciar properties de la sala
+            const directorioUsuarioProperties = directorioUsuario + "/user.properties"
+            fs.copyFileSync(user_recomendations_properties, directorioUsuarioProperties)
+
+            // agregar propiedades a las propiedades del grupo
+            const semilla = String(2) + "\n"
+            const recommenderAlgo = "biasedmf\n"
+            const directorioResultado = recommendations_results_users + "\n"
+            const dataInputPathName = "users_data" + "\n"
+            fs.appendFileSync(directorioUsuarioProperties, "\nrec.random.seed=" + semilla)
+            fs.appendFileSync(directorioUsuarioProperties, "rec.recommender.class=" + recommenderAlgo)
+            fs.appendFileSync(directorioUsuarioProperties, "dfs.data.dir=" + directorioDataUsuario + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "dfs.result.dir=" + directorioResultado)
+            fs.appendFileSync(directorioUsuarioProperties, "data.input.path=" + dataInputPathName)
+
+            // ejectuar grouplibrec
+            const args = ["-jar", exec_individualLibrec, "-exec", "-conf", idGrupo, directorioUsuarioProperties, idUsuario]
+            const grouplibrec = spawn("java", args)
+            grouplibrec.stdout.on("data", (data) => {
+                console.log(`out: ${data}`)
+            })
+            grouplibrec.stderr.on("data", (data) => {
+                console.log(`error: ${data}`)
+            })
+            grouplibrec.on("close", async (code) => {
+                if (code === 0) {
+                    // devolver items recomendados para el grupo
+                    console.log(`exit success: ${code}`)
+                    const directorioResultadosSala = recommendations_results_users + "/" + idGrupo + "/" + idUsuario + "/"
+                    let items = []
+                    const recomendaciones = fs.readdirSync(directorioResultadosSala)
+                    const directorioUltimaRecomendacion = recomendaciones.sort()[recomendaciones.length - 1]
+                    let trecomendaciones = fs.readFileSync(directorioResultadosSala + directorioUltimaRecomendacion + "/recommendations.txt", "utf-8")
+                    let arrayRecomendaciones = trecomendaciones.split("\n")
+
+                    //var data2 = fs.readFileSync(dir_tracks_data, "utf-8")
+                    //data2 = data2.split("\n")
+
+                    for (let i = 0; i < arrayRecomendaciones.length - 1; i++) {
+                        let recomendacion = arrayRecomendaciones[i].split(",");
+                        let grupo = recomendacion[0];
+                        let item = parseInt(recomendacion[1]);
+                        let rating_individual = recomendacion[2];
+
+                        let found_item = await db.collection("tracks").findOne({ item_id: parseInt(item) })
+
+                        let trackItemId = found_item.item_id
+                        let nombreItem = found_item.track_name
+                        let tipoItem = found_item.track_category
+                        let url_item = found_item.track_url
+                        let idAutor = found_item.artist_id
+                        let nombreAutor = found_item.artist_name
+                        let urlAutor = found_item.artist_url
+                        let originAutor = found_item.artist_country
+                        let continentAutor = found_item.artist_continent
+
+                        let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg";
+                        if (fs.existsSync(path_imagen)) {
+                            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg";
+                        } else {
+                            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png";
+                        }
+                        items.push({
+                            idItem: String(item),
+                            rating: rating_individual,
+                            pathImagen: path_imagen,
+                            pathItem: path_imagen,
+                            nombreItem: nombreItem,
+                            tipoItem: tipoItem,
+                            url_item: url_item,
+                            id_autor: idAutor,
+                            nombre_autor: nombreAutor,
+                            url_autor: urlAutor,
+                            origin_autor: originAutor,
+                            continent_autor: continentAutor,
+                        });
+                    }
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("usuarios").updateOne(
+                        { _id: new ObjectId(idUsuario) },
+                        {
+                            $push:
+                            {
+                                recomendaciones:
+                                    { idSala: idGrupo, time: tiempo_actual, items: items_ordenados }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+                else {
+                    console.log(`exit error: ${code}`)
+                }
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/ejecutar-recomendacion-grupal", async (req, res) => {
+    const idSala = req.query.idGrupo
+    try {
+
+        LOG.info(`[GROUP-RECOMMENDATION] Room ${idSala}: Group Recommendation has started`, systemLogEvent("group-rec"))
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idSala) })
+        const groupUsers = []
+        if (sala) {
+            // fecha recomendacion
+            const tiempo_actual = Date.now()
+
+            // crear directorio del grupo si no existe
+            const directorioGrupo = dir_recommendations_rooms + "/" + idSala
+            const directorioDataGrupo = directorioGrupo + "/data"
+
+            if (!fs.existsSync(directorioGrupo)) {
+                fs.mkdirSync(directorioGrupo)
+            }
+            if (!fs.existsSync(directorioDataGrupo)) {
+                fs.mkdirSync(directorioDataGrupo)
+            }
+            //const usersDataGroup = directorioDataGrupo + "/users_data"
+            const usersDataGroup = directorioDataGrupo + "/users_data"
+
+            // crear y/o reiniciar dataset del grupo
+            fs.copyFileSync(dir_recommendations_dataset_users, usersDataGroup)
+
+            // añadir calificaciones de usuarios al dataset
+            sala.usuarios_activos.forEach(async (usuario) => {
+                groupUsers.push(usuario._id.toString())
+                const user = await db.collection("usuarios").findOne({ _id: new ObjectId(usuario._id.toString()) })
+                user.calificaciones.forEach((calificacion) => {
+                    var idItem = calificacion.id_item
+                    var linea = calificacion.linea
+                    fs.appendFileSync(usersDataGroup, linea)
+                })
+            })
+
+            // crear y/o reiniciar properties de la sala
+            const directorioProperties = directorioGrupo + "/group.properties"
+            fs.copyFileSync(group_recomendations_properties, directorioProperties)
+
+            // agregar propiedades a las propiedades del grupo
+            const semilla = String(2) + "\n"
+            const recommenderAlgo = "biasedmf\n"
+            const directorioData = usersDataGroup + "\n"
+            const directorioResultado = dir_recommendations_results + "\n"
+            const dataInputPathName = "users_data" + "\n"
+            const groupSize = String(sala.usuarios_activos.length) + "\n"
+            fs.appendFileSync(directorioProperties, "\nrec.random.seed=" + semilla)
+            fs.appendFileSync(directorioProperties, "group.base.recommender.class=" + recommenderAlgo)
+            fs.appendFileSync(directorioProperties, "dfs.data.dir=" + directorioDataGrupo + "\n")
+            fs.appendFileSync(directorioProperties, "dfs.result.dir=" + directorioResultado)
+            fs.appendFileSync(directorioProperties, "group.similar.groupSize=" + groupSize)
+            fs.appendFileSync(directorioProperties, "data.input.path=" + dataInputPathName)
+
+            // ejectuar grouplibrec
+            const args = ["-jar", exec_grouplibrec, "-exec", "-conf", idSala, directorioProperties, ...groupUsers]
+            //const javaVersionPath = "/home/asmith/java/java-11-openjdk-amd64/bin/java"
+            const grouplibrec = spawn("java", args)
+            grouplibrec.stdout.on("data", (data) => {
+                console.log(`out: ${data}`)
+            })
+            grouplibrec.stderr.on("data", (data) => {
+                console.log(`error: ${data}`)
+            })
+            grouplibrec.on("close", async (code) => {
+                if (code === 0) {
+                    // devolver items recomendados para el grupo
+                    console.log(`exit success: ${code}`)
+                    const directorioResultadosSala = dir_recommendations_results + "/" + idSala + "/"
+                    let items = []
+                    const recomendaciones = fs.readdirSync(directorioResultadosSala)
+                    const directorioUltimaRecomendacion = recomendaciones.sort()[recomendaciones.length - 1]
+                    let trecomendaciones = fs.readFileSync(directorioResultadosSala + directorioUltimaRecomendacion + "/recommendations.txt", "utf-8")
+                    let arrayRecomendaciones = trecomendaciones.split("\n")
+                    for (let i = 0; i < arrayRecomendaciones.length - 1; i++) {
+                        let recomendacion = arrayRecomendaciones[i].split(",")
+                        let grupo = recomendacion[0]
+                        let item = recomendacion[1]
+                        let rating_grupo = recomendacion[2]
+                        if (item) {
+                            let found_item = await db.collection("tracks").findOne({ item_id: parseInt(item) })
+
+                            let trackItemId = found_item.item_id
+                            let nombreItem = found_item.track_name
+                            let tipoItem = found_item.track_category
+                            let url_item = found_item.track_url
+                            let idAutor = found_item.artist_id
+                            let nombreAutor = found_item.artist_name
+                            let urlAutor = found_item.artist_url
+                            let originAutor = found_item.artist_country
+                            let continentAutor = found_item.artist_continent
+
+                            let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+                            if (fs.existsSync(path_imagen)) {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+                            }
+                            else {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+                            }
+
+                            items.push({
+                                idGrupo: grupo,
+                                idItem: item,
+                                rating: rating_grupo,
+                                pathImagen: path_imagen,
+                                pathItem: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                url_item: url_item,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                            })
+                        }
+                    }
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("salas").updateOne(
+                        { _id: new ObjectId(idSala) },
+                        {
+                            $addToSet: {
+                                recomendaciones_grupal: {
+                                    time: tiempo_actual,
+                                    items: items_ordenados
+                                }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+                else {
+                    console.log(`exit error: ${code}`)
+                }
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/obtener-recomendaciones-usuario", async (req, res) => {
+    const idUsuario = req.query.idUsuario
+    const idSala = req.query.idSala
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(idUsuario) })
+        client.close()
+        if (usuario) {
+            const recomendacionesUsuario = usuario.recomendaciones.filter((recomendacion) => {
+                return recomendacion.idSala === idSala
+            })
+
+            if (recomendacionesUsuario.length > 0) {
+                return res.json(recomendacionesUsuario)
+            } else {
+                return res.json({
+                    error: "No recommendations found for the specified idSala.",
+                })
+            }
+        }
+        return res.json({
+            error: "User not found.",
+        });
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/obtener-recomendaciones-grupo", async (req, res) => {
+    const idSala = req.query.idSala
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idSala) })
+        client.close()
+        if (sala) {
+            if (sala.recomendaciones_grupal.length > 0) {
+                return res.json(sala.recomendaciones_grupal)
+            }
+            else {
+                return res.json({
+                    error: "No recommendations found for the specified idSala.",
+                })
+            }
+        }
+        return res.json({
+            error: "Group not found.",
+        })
+    }
+    catch (error) {
+        console.log(error)
+    }
+
+})
+
+app.get("/obtener-item", async (req, res) => {
+    const idItem = req.query.idItem
+
+    const client = await MongoClient.connect(url)
+    const db = client.db(dbName)
+    const item = await db.collection("tracks").findOne({ item_id: parseInt(idItem) })
+
+    let idTrack = item.item_id
+    let nombreItem = item.track_name
+    let tipoItem = item.track_category
+    let url_item = item.track_url
+    let idAutor = item.artist_id
+    let nombreAutor = item.artist_name
+    let urlAutor = item.artist_url
+    let originAutor = item.artist_country
+    let continentAutor = item.artist_continent
+
+    let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+    if (fs.existsSync(path_imagen)) {
+        path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+    }
+    else {
+        path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+    }
+    client.close()
+    return res.json({
+        idItem: idItem,
+        nombreItem: nombreItem,
+        tipoItem: tipoItem,
+        pathItem: path_imagen,
+        url_item: url_item,
+        id_autor: idAutor,
+        nombre_autor: nombreAutor,
+        url_autor: urlAutor,
+        origin_autor: originAutor,
+        continent_autor: continentAutor,
+        imagen: path_imagen,
+    })
+
+
+
+    //for (let item = 0; item < data2.length; item++) {
+    //    if (data2[item].split(splitType)[0] === String(idItem)) {
+    //        nombreItem = data2[item].split(splitType)[1]
+    //        tipoItem = data2[item].split(splitType)[2]
+    //        url_item = data2[item].split(splitType)[3]
+    //        idAutor = data2[item].split(splitType)[6]
+    //        let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+    //        if (fs.existsSync(path_imagen)) {
+    //            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+    //        }
+    //        else {
+    //            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+    //        }
+    //        return res.json({
+    //            idItem: idItem,
+    //            nombreItem: nombreItem,
+    //            tipoItem: tipoItem,
+    //            pathItem: path_imagen,
+    //            url_item: url_item
+    //        })
+    //    }
+    //}
+
+    //return res.json({
+    //    estado: "no hay items"
+    //})
+
+})
+
+app.get("/obtener-item-no-calificado", async (req, res) => {
+    const id_usuario = req.query.id_usuario
+    const cant_data = 443920
+    let idItem = Math.floor(Math.random() * cant_data) + 1
+    let idTrack
+    let nombreItem
+    let tipoItem
+    let urlItem
+    let idAutor
+    let nombreAutor
+    let urlAutor
+    let originAutor
+    let continentAutor
+    let itemId
+    let splitType = ","
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(id_usuario) })
+
+        const randomDocument = await db.collection("tracks").find().skip(idItem).limit(1).toArray();
+        const doc = randomDocument[0]
+
+        let isIdFound = true
+
+        while (isIdFound) {
+            isIdFound = usuario.calificaciones.some(item => item.id_item === String(doc.item_id))
+        }
+
+        const item = doc
+
+        idTrack = item.item_id
+        nombreItem = item.track_name
+        tipoItem = item.track_category
+        urlItem = item.track_url
+        idAutor = item.artist_id
+        nombreAutor = item.artist_name
+        urlAutor = item.artist_url
+        originAutor = item.artist_country
+        continentAutor = item.artist_continent
+        itemId = item.item_id
+
+        let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+        if (fs.existsSync(path_imagen)) {
+            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+        }
+        else {
+            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+        }
+        client.close()
+        return res.json({
+            id_pelicula: itemId,
+            nombre_pelicula: nombreItem,
+            tipo_pelicula: tipoItem,
+            url_item: urlItem,
+            id_autor: idAutor,
+            nombre_autor: nombreAutor,
+            url_autor: urlAutor,
+            origin_autor: originAutor,
+            continent_autor: continentAutor,
+            imagen: path_imagen
+        })
+    }
+    catch (error) {
+        console.log(error)
+    }
+
+})
+
+app.post("/calificar-item", async (req, res) => {
+    try {
+        //fs.appendFileSync(ratingsUsuariosDir+"/"+String(id_usuario), linea, "utf-8")
+        //escribir en el archivo las calificaciones
+        let rating_usuario = req.body
+        let id_usuario = String(rating_usuario.id_usuario)
+        let id_item = String(rating_usuario.id_item)
+        let rating_item = String(rating_usuario.rating)
+        //let numb = Math.floor(Math.random() * 978300760) + 1
+        //let linea = id_usuario + "::" + id_item + "::" + rating_item + "::" + String(numb) + "\n"
+        let linea = id_usuario + "," + id_item + "," + rating_item + "," + String(500) + "\n"
+
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+
+        const item_calificado = {
+            id_item: id_item,
+            linea: linea,
+            rating: rating_item
+        }
+
+        const user = await db.collection("usuarios").findOne({
+            _id: new ObjectId(rating_usuario.id_usuario),
+            "calificaciones.id_item": id_item
+        })
+
+        if (user) {
+            await db.collection("usuarios").updateOne(
+                {
+                    _id: new ObjectId(rating_usuario.id_usuario),
+                    "calificaciones.id_item": id_item
+                },
+                {
+                    $set: {
+                        "calificaciones.$.linea": linea,
+                        "calificaciones.$.rating": rating_item
+                    }
+                }
+            )
+            LOG.info(`[ITEM-RATING] User ${id_usuario} has changed itemId: ${id_item} rating to ${rating_item}`, systemLogEvent("item-rating"))
+        }
+        else {
+            await db.collection("usuarios").updateOne(
+                { _id: new ObjectId(rating_usuario.id_usuario) },
+                { $addToSet: { calificaciones: item_calificado } }
+            )
+            LOG.info(`[ITEM-RATING] User ${id_usuario} rated itemId: ${id_item} a ${rating_item}`, systemLogEvent("item-rating"))
+        }
+
+        //await db.collection("usuarios").updateOne(
+        //    { _id: new ObjectId(rating_usuario.id_usuario) },
+        //    { $addToSet: { calificaciones: item_calificado } }
+        //)
+
+        //await db.collection("usuarios").updateOne(
+        //    {
+        //        _id: new ObjectId(rating_usuario.id_usuario),
+        //        "calificaciones.id_item": id_item // Check if an object with the same id_item exists
+        //    },
+        //    {
+        //        $set: {
+        //            "calificaciones.$.linea": linea,
+        //            "calificaciones.$.rating": rating_item
+        //        }
+        //    }
+        //)
+
+        client.close()
+        return res.json({
+            estado: "agregado"
+        })
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+
+app.get("/obtener-item-calificacion", async (req, res) => {
+    try {
+        let idUsuario = req.query.idUsuario
+        let idItem = String(req.query.idItem)
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+
+        const user = await db.collection("usuarios").findOne(
+            {
+                _id: new ObjectId(idUsuario),
+                "calificaciones.id_item": idItem
+            }
+        )
+        client.close();
+        if (user) {
+            const itemCalificado = user.calificaciones.find(item => item.id_item === idItem);
+            if (itemCalificado) {
+                return res.json({
+                    item: itemCalificado
+                })
+            }
+        }
+        return res.json({
+            item: null
+        })
+    }
+    catch (error) {
+        console.log(error);
+    }
+})
+
+app.post("/enviar-al-stack", async (req, res) => {
+    const idGrupo = req.body.idGrupo
+    const idUsuario = req.body.idUsuario
+    const idItem = req.body.idItem
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const item = await db.collection("tracks").findOne({ item_id: parseInt(idItem) })
+        let idTrack = item.item_id
+        let nombreItem = item.track_name
+        let tipoItem = item.track_category
+        let urlItem = item.track_url
+        let idAutor = item.artist_id
+        let nombreAutor = item.artist_name
+        let urlAutor = item.artist_url
+        let originAutor = item.artist_country
+        let continentAutor = item.artist_continent
+        let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+        if (fs.existsSync(path_imagen)) {
+            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+        }
+        else {
+            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+        }
+        await db.collection("salas").updateOne(
+            { _id: new ObjectId(idGrupo), "recomendaciones_stack.id_usuario": idUsuario },
+            {
+                $addToSet: {
+                    "recomendaciones_stack.$.items": {
+                        idItem: idItem,
+                        pathImagen: path_imagen,
+                        nombreItem: nombreItem,
+                        tipoItem: tipoItem,
+                        pathItem: path_imagen,
+                        url_item: urlItem,
+                        id_autor: idAutor,
+                        nombre_autor: nombreAutor,
+                        url_autor: urlAutor,
+                        origin_autor: originAutor,
+                        continent_autor: continentAutor,
+                        imagen: path_imagen,
+                    }
+                }
+            }
+        )
+        LOG.info(`[FAVORITES] User ${idUsuario} added itemId: ${idItem} to room ${idGrupo} favorites`, systemLogEvent("add-favorites"))
+        client.close()
+        return res.json({
+            resp: "agregado"
+        })
+    }
+    catch (error) {
+        console.log(error)
+        return res.json({
+            resp: "error"
+        })
+    }
+})
+
+app.delete("/eliminar-del-stack", async (req, resp) => {
+    const idGrupo = req.body.idGrupo
+    const idUsuario = req.body.idUsuario
+    const idItem = req.body.idItem
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        await db.collection("salas").updateOne(
+            {
+                _id: new ObjectId(idGrupo),
+                "recomendaciones_stack.id_usuario": idUsuario
+            },
+            {
+                $pull: {
+                    "recomendaciones_stack.$.items": {
+                        idItem: idItem
+                    }
+                }
+            }
+        )
+        const sala = await db.collection("salas").findOne(
+            { _id: new ObjectId(idGrupo) }
+        )
+        const usuarioStack = sala.recomendaciones_stack.find(obj => obj.id_usuario === idUsuario)
+        client.close()
+
+        LOG.info(`[FAVORITES] User ${idUsuario} removed itemId: ${idItem} from room ${idGrupo} favorites`, systemLogEvent("remove-favorites"))
+        if (usuarioStack) {
+            return resp.json({
+                items: usuarioStack.items
+            })
+        }
+        return resp.json({
+            items: {}
+        })
+
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/check-eliminar", async(req, resp) => {
+    const idGrupo = req.query.idGrupo
+    try{
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne(
+            { _id: new ObjectId(idGrupo) }
+        )
+        console.log(sala.sala_espera.length)
+        if (sala.sala_espera.length === 0){
+            return resp.json({
+                delete: true
+            })
+        }
+        return resp.json({
+            delete: false
+        })
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+app.delete("/eliminar-de-favoritos", async (req, resp) => {
+    const idGrupo = req.body.idGrupo
+    const idUsuario = req.body.idUsuario
+    const idItem = req.body.idItem
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        await db.collection("salas").updateOne(
+            {
+                _id: new ObjectId(idGrupo)
+            },
+            {
+                $pull: {
+                    "recomendaciones_favoritos": {
+                        idItem: idItem
+                    }
+                }
+            }
+        )
+        const sala = await db.collection("salas").findOne(
+            { _id: new ObjectId(idGrupo) }
+        )
+        const salaFavoritos = sala.recomendaciones_favoritos
+        client.close()
+        LOG.info(`[FAVORITES] User ${idUsuario} removed itemId: ${idItem} from room ${idGrupo} favorites`, systemLogEvent("remove-favorites"))
+        if (salaFavoritos) {
+            return resp.json({
+                items: salaFavoritos.items
+            })
+        }
+        return resp.json({
+            items: {}
+        })
+
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.post("/enviar-a-favoritos", async (req, res) => {
+    const idGrupo = req.body.idGrupo
+    const idUsuario = req.body.idUsuario
+    const idItem = req.body.idItem
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const item = await db.collection("tracks").findOne({ item_id: parseInt(idItem) })
+        const usuario = await db.collection("usuarios").findOne(
+            { _id: new ObjectId(idUsuario) }
+        )
+        const nombreUsuario = usuario.usuario
+        let idTrack = item.item_id
+        let nombreItem = item.track_name
+        let tipoItem = item.track_category
+        let urlItem = item.track_url
+        let idAutor = item.artist_id
+        let nombreAutor = item.artist_name
+        let urlAutor = item.artist_url
+        let originAutor = item.artist_country
+        let continentAutor = item.artist_continent
+        let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+        if (fs.existsSync(path_imagen)) {
+            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+        }
+        else {
+            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+        }
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idGrupo) })
+        if (sala) {
+            if (sala.recomendaciones_favoritos.some(item => item.idItem === String(idItem))){
+                return res.json({
+                    respuesta: "existe"
+                })
+            }
+            if (sala.recomendaciones_favoritos.length < maxFavoritos) {
+                await db.collection("salas").updateOne(
+                    { _id: new ObjectId(idGrupo) },
+                    {
+                        $addToSet: {
+                            "recomendaciones_favoritos": {
+                                idItem: String(idItem),
+                                pathImagen: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                pathItem: path_imagen,
+                                url_item: urlItem,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                                imagen: path_imagen,
+                                recomendadoPor: idUsuario,
+                                recomendadoPorUsuario: nombreUsuario
+                            }
+                        }
+                    }
+                )
+                client.close()
+                LOG.info(`[FAVORITES] User ${idUsuario} added itemId: ${idItem} to room ${idGrupo} favorites`, systemLogEvent("add-favorites"))
+                return res.json({
+                    respuesta: "agregado"
+                })
+            }
+            else {
+                client.close()
+                return res.json({
+                    respuesta: "no_agregado",
+                    maxFavoritos: maxFavoritos
+                })
+            }
+        }
+        return res.json({
+            respuesta: "no_hay_sala"
+        })
+    }
+    catch (error) {
+        console.log(error)
+        return res.json({
+            resp: "error"
+        })
+    }
+})
+
+app.get("/verificar-calificaciones-favoritos", async (req, resp) => {
+    try {
+        const idUsuario = req.query.idUsuario
+        const idGrupo = req.query.idGrupo
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne(
+            { _id: new ObjectId(idGrupo) }
+        )
+        const usuario = await db.collection("usuarios").findOne(
+            { _id: new ObjectId(idUsuario) }
+        )
+        client.close()
+        const verificar = {
+            todos_calificados: false, //todos estan calificados
+            cantidad_calificados: false, //la cantidad en favoritos esta bien
+            minimo_calificados: false //todos los usuarios calificaron al menos uno
+        }
+        if (sala && usuario) {
+            // array con id's de los favoritos
+            const favoritos_sala = sala.recomendaciones_favoritos.map(favorito => favorito)
+            const usuariosid_favoritos = sala.recomendaciones_favoritos.map(favorito => favorito.recomendadoPor)
+            const usuarios_sala = sala.usuarios_activos.map(usuario => String(usuario._id))
+            const no_calificados = []
+
+            favoritos_sala.forEach(itemFavorito => {
+                const checkItem = usuario.calificaciones.find(itemCalificado => itemCalificado.id_item === itemFavorito.idItem);
+                console.log(checkItem+" "+itemFavorito.idItem)
+                if (!checkItem || checkItem.rating === undefined) {
+                    no_calificados.push(
+                        { 
+                            id_item: itemFavorito.idItem,
+                            recommended_by: itemFavorito.recomendadoPor
+                        }
+                        )
+                }
+            })
+
+            // check que haya al menos un favorito por usuario
+            for (let i = 0; i < usuarios_sala.length; i++){
+                if (!usuariosid_favoritos.includes(usuarios_sala[i])){
+                    verificar.minimo_calificados = false 
+                    break
+                }
+                verificar.minimo_calificados = true
+            }
+
+            /*
+            // obtener los calificados del usuario
+            favoritos_sala.forEach(itemFavorito => {
+                if (!usuario.calificaciones.some(itemCalificado => itemCalificado.id_item === itemFavorito)) {
+                    if (!itemFavorito.rating){
+                        no_calificados.push(itemFavorito)
+                    }
+                }
+            })
+            */
+
+            if (no_calificados.length === 0) {
+                LOG.info(`[CONSENSUS] Room ${idGrupo}: User ${idUsuario}. Every item is rated in favorites`, systemLogEvent("consensus-favorites"))
+                verificar.todos_calificados = true
+            }
+            else {
+                LOG.info(`[CONSENSUS] Room ${idGrupo}: User ${idUsuario}. Missing items to rate in favorites: ${JSON.stringify(no_calificados)}`, systemLogEvent("consensus-favorites"))
+            }
+
+            if (sala.recomendaciones_favoritos.length === maxFavoritos) {
+                LOG.info(`[CONSENSUS] Room ${idGrupo}: User ${idUsuario}. ${maxFavoritos} items reached in favorites`, systemLogEvent("consensus-favorites"))
+                verificar.cantidad_calificados = true
+            }
+            else {
+                LOG.info(`[CONSENSUS] Room ${idGrupo}: User ${idUsuario}. ${maxFavoritos} items are needed in favorites`, systemLogEvent("consensus-favorites"))
+            }
+
+            if (verificar.todos_calificados && verificar.cantidad_calificados) {
+                if (verificar.minimo_calificados){
+                    LOG.info(`[CONSENSUS] Room ${idGrupo}: User ${idUsuario} joinned the consensus and is waiting for everyone to finish`, systemLogEvent("consensus-favorites"))
+                    return resp.json({
+                        respuesta: "ok",
+                        code: 1,
+                        maxFavoritos: maxFavoritos
+                    })
+                }
+            }
+
+            LOG.info(`[CONSENSUS] Room ${idGrupo}: User ${idUsuario} started the consensus but failed. Cause: missing verifiers\n
+                      verificar.cantidad_calificados: ${verificar.cantidad_calificados}\n
+                      verificar.todos_calificados: ${verificar.todos_calificados}\n
+                      verificar.minimo_calificados: ${verificar.minimo_calificados}  `, systemLogEvent("consensus-favorites"))
+            return resp.json({
+                respuesta: "stop",
+                code: 0,
+                maxFavoritos: maxFavoritos,
+                cantidad_calificados: verificar.cantidad_calificados,
+                todos_calificados: verificar.todos_calificados,
+                minimo_calificados: verificar.minimo_calificados
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/obtener-favoritos-sala", async (req, resp) => {
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne(
+            { _id: new ObjectId(req.query.idGrupo) }
+        )
+        const idUsuario = req.query.idUsuario
+        const usuario = await db.collection("usuarios").findOne(
+            { _id: new ObjectId(idUsuario) }
+        )
+        const no_calificados = []
+
+        const favoritosSala = sala.recomendaciones_favoritos
+        const newFavoritos = []
+        favoritosSala.forEach(itemFavorito => {
+            const checkItem = usuario.calificaciones.find(itemCalificado => itemCalificado.id_item === itemFavorito.idItem);
+            if (!checkItem || checkItem.rating === undefined) {
+                //no_calificados.push(
+                //    { 
+                //        id_item: itemFavorito.idItem,
+                //        recommended_by: itemFavorito.recomendadoPor
+                //    }
+                //    )
+                newFavoritos.push({...itemFavorito, rated: false})
+            }
+            else{
+                newFavoritos.push({...itemFavorito, rated: true})
+            }
+        })
+        client.close()
+        if (favoritosSala) {
+            return resp.json({
+                items: newFavoritos
+            })
+        }
+        return resp.json({
+            items: {}
+        })
+    }
+    catch (error) {
+        console.log(error)
+        return resp.json({
+            items: "error"
+        })
+    }
+})
+
+
+app.get("/obtener-stack-usuario", async (req, resp) => {
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne(
+            { _id: new ObjectId(req.query.idGrupo) }
+        )
+        const usuarioStack = sala.recomendaciones_stack.find(obj => obj.id_usuario === req.query.idUsuario)
+        client.close()
+        if (usuarioStack) {
+            return resp.json({
+                items: usuarioStack.items
+            })
+        }
+        return resp.json({
+            items: {}
+        })
+    }
+    catch (error) {
+        console.log(error)
+        return resp.json({
+            items: "error"
+        })
+    }
+})
+
+app.get("/obtener-test-personalidad", async (req, resp) => {
+    try {
+        const currentLang = req.query.currentLang
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        if (currentLang === "en" || currentLang === "en-US"){
+            const preguntas = await db.collection("FFM_Test_en").find({}).toArray()
+            if (preguntas) {
+                client.close()
+                return resp.json({
+                    preguntas: preguntas
+                })
+            }
+        }
+        else {
+            const preguntas = await db.collection("FFM_Test").find({}).toArray()
+            if (preguntas) {
+                client.close()
+                return resp.json({
+                    preguntas: preguntas
+                })
+            }
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.post("/generar-personalidad", async (req, resp) => {
+    try {
+        const respuestas = req.body.respuestas
+        const idUsuario = req.body.idUsuario
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        let extraversion = 0
+        let empatia = 0
+        let conciencia = 0
+        let neuroticismo = 0
+        let experiencia = 0
+        respuestas.forEach(async item => {
+            if (item.factor === 1) {
+                extraversion += parseInt(item.respuesta)
+            }
+            else if (item.factor === 2) {
+                empatia += parseInt(item.respuesta)
+            }
+            else if (item.factor === 3) {
+                conciencia += parseInt(item.respuesta)
+            }
+            else if (item.factor === 4) {
+                neuroticismo += parseInt(item.respuesta)
+            }
+            else if (item.factor === 5) {
+                experiencia += parseInt(item.respuesta)
+            }
+        })
+        let personalidad = {
+            idUsuario: idUsuario,
+            extraversion: extraversion,
+            empatia: empatia,
+            conciencia: conciencia,
+            neuroticismo: neuroticismo,
+            experiencia: experiencia
+        }
+        await db.collection("personalidades").insertOne(personalidad)
+        client.close()
+        LOG.info(`[TEST-PERSONALITY] Personality test for user ${idUsuario} generated`, systemLogEvent("personality-test"))
+        return resp.json({
+            ok: "si"
+        })
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.post("/generar-perfil", async (req, res) => {
+    try {
+        let gustos = req.body.categories
+        const idUsuario = req.body.idUsuario
+        //const idUsuario = "64bdbbd13f30efcf1bde4e33"
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        //const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(idUsuario) })
+
+        for (const genero in gustos) {
+            if (gustos[genero]) {
+                let nombre_perfil = "Profile_"
+                switch (genero) {
+                    case "metal":
+                        nombre_perfil = nombre_perfil + "Metal"
+                        break
+                    case "electronica":
+                        nombre_perfil = nombre_perfil + "Electronica"
+                        break
+                    case "rock":
+                        nombre_perfil = nombre_perfil + "Rock"
+                        break
+                    case "jazz":
+                        nombre_perfil = nombre_perfil + "Jazz"
+                        break
+                    case "country":
+                        nombre_perfil = nombre_perfil + "Country"
+                        break
+                    case "folk":
+                        nombre_perfil = nombre_perfil + "Folk"
+                        break
+                    case "funk":
+                        nombre_perfil = nombre_perfil + "Funk"
+                        break
+                    case "blues":
+                        nombre_perfil = nombre_perfil + "Blues"
+                        break
+                    case "rap":
+                        nombre_perfil = nombre_perfil + "Rap"
+                        break
+                    case "soundtrack":
+                        nombre_perfil = nombre_perfil + "Soundtrack"
+                        break
+                    case "espiritual":
+                        nombre_perfil = nombre_perfil + "Espiritual"
+                        break
+                    case "alternativo":
+                        nombre_perfil = nombre_perfil + "Alternativo"
+                        break
+                    case "pop":
+                        nombre_perfil = nombre_perfil + "Pop"
+                        break
+                }
+                var perfil = fs.readFileSync(dir_recommendations+"/profiles/" + nombre_perfil, "utf-8")
+                let calificacion
+                let arrayRecomendaciones = perfil.split("\n")
+                for (let i = 0; i < arrayRecomendaciones.length - 1; i++) {
+                    let track = arrayRecomendaciones[i].split(",")[0]
+                    let rating = arrayRecomendaciones[i].split(",")[1]
+                    let listen = arrayRecomendaciones[i].split(",")[2]
+                    calificacion = idUsuario + "," + track + "," + rating + "," + listen + "\n"
+                    let item_calificado = {
+                        id_item: track,
+                        linea: calificacion,
+                        rating: rating
+                    }
+                    await db.collection("usuarios").updateOne(
+                        { _id: new ObjectId(idUsuario) },
+                        { $addToSet: { calificaciones: item_calificado } }
+                    )
+                }
+            }
+        }
+        //var perfil = fs.readFileSync("/home/asmith/recomendaciones/profiles", "utf-8")
+        //console.log(gustos, idUsuario)
+        client.close()
+        LOG.info(`[USER-TASTE] Taste Profile for user ${idUsuario} generated`, systemLogEvent("user-taste"))
+        return res.json({
+            ok: "ok"
+        })
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.delete("/eliminar-fichero", async (req, res) => {
+    let usuario_idSesion = req.body?.id_sesion
+    if (usuario_idSesion !== undefined) {
+        try {
+            const client = await MongoClient.connect(url);
+            const db = client.db(dbName);
+            const usuario = await db.collection("sala").doc(usuario_idSesion).get()
+            const usuario_numero = usuario?.data()?.numero_usuario
+            if (usuario_numero !== undefined) {
+                fs.unlinkSync(dir_ratings + "/" + String(usuario_numero))
+                return res.json({
+                    estado: "eliminado"
+                })
+            }
+        } catch (error) {
+            console.log(error)
+            return res.json({
+                estado: "no existe o ya fue eliminado"
+            })
+        }
+    }
+})
+
+app.delete("/vaciar-sala-espera", async (req, res) => {
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = { _id: new ObjectId(req.query.idSala) }
+        const update = {
+            $set: { sala_espera: [] }
+        }
+        await db.collection('salas').updateOne(sala, update)
+        return res.json({
+            status: "sala espera vaciada"
+        })
+    }
+    catch (error) {
+        console.log(error)
+        return res.json({
+            status: "sala espera no vaciada"
+        })
+    }
+})
+
+app.delete("/vaciar-sala", async (req, res) => {
+    try {
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = { _id: new ObjectId(req.query.idSala) }
+        const update = {
+            $set: { usuarios_activos: [] }
+        }
+        await db.collection('salas').updateOne(sala, update)
+        return res.json({
+            status: "sala vaciada"
+        })
+    }
+    catch (error) {
+        console.log(error)
+        return res.json({
+            status: "sala no vaciada"
+        })
+    }
+})
+
+app.post("/evento-usuario", async (req, res) => {
+    // Extract data from the request body
+    let evento_tipo = req.body.evento; // "vistos", "recomendados", "favoritos", or "escuchados"
+    let idSala = req.body.idSala;
+    let idUsuario = req.body.idUsuario;
+
+    try {
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+
+        // Use $elemMatch to find the specific user within the array
+        const userQuery = { id_sala: idSala, "usuarios.id_usuario": idUsuario };
+
+        // Fetch the current value of score for the user
+        const userEvento = await db.collection("salas_eventos").findOne(userQuery);
+        const currentUserScore = userEvento.usuarios.find(user => user.id_usuario === idUsuario).score[evento_tipo];
+
+        // Calculate the new score value (you can adjust this logic as needed)
+        let newScoreValue = currentUserScore + 1;
+
+        // Build the update object
+        let updateObj = {};
+        updateObj[`usuarios.$.score.${evento_tipo}`] = newScoreValue;
+
+        const result = await db.collection("salas_eventos").updateOne(userQuery, { $set: updateObj });
+
+        client.close();
+        if (result.matchedCount > 0) {
+            // Update successful
+            LOG.info(`[USER-EVENT] Room ${idSala}: User ${idUsuario} made an event: ${evento_tipo}`, systemLogEvent("user-event"))
+            return res.json({
+                "resp": `Updated ${evento_tipo} for user ${idUsuario} in sala ${idSala}`
+            })
+        } else {
+            return res.json({
+                "resp": `User not found in sala ${idSala}`
+            })
+        }
+
+    } catch (error) {
+        console.error(error);
+    }
+})
+
+app.post("/enviar-encuesta-final", async (req, resp) => {
+    try{
+        let idUsuario = req.body.idUsuario
+        let idSala = req.body.idSala
+        let respuestas = req.body.respuestas
+        let encuesta = {
+            idSala: idSala,
+            idUsuario: idUsuario,
+            respuestas: respuestas
+        }
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+        const result = await db.collection("cuestionario-final").insertOne(encuesta)
+        client.close()
+        if (result.insertedId) {
+            LOG.info(`[USER-QUESTIONNAIRE] Room ${idSala}: User ${idUsuario} ended the questionnaire`, systemLogEvent("user-final-questionnaire"))
+            return resp.json({
+                resp: "ok"
+            })
+        } 
+        return resp.json({
+            resp: "error"
+        })
+          
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+app.delete("/delete-room", async (req, resp) => {
+    const idSala = req.query.idSala
+    try{
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+
+        const sala = await db.collection("sala").deleteOne({ _id: ObjectId(idSala) })
+        if (sala.deletedCount === 1){
+            LOG.info(`[DELETE-ROOM] Room ${idSala} was deleted`, systemLogEvent("delete-room"))
+            return resp.json({
+                "resp": `Deleted room ${idSala}`
+            })
+        }
+        else{
+            LOG.info(`[DELETE-ROOM] Room ${idSala} was not deleted`, systemLogEvent("delete-room"))
+            return resp.json({
+                "resp": `Room ${idSala} not deleted`
+            })
+        }
+
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+app.delete("/delete-all-rooms", async (req, resp) => {
+    try{
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+        const result = await db.collection("sala").deleteMany({});
+
+        if (result.deletedCount === 1){
+            LOG.info(`[DELETE-ROOM] All rooms were deleted`, systemLogEvent("delete-room"))
+            return resp.json({
+                "resp": `All rooms deleted`
+            })
+        }
+        else{
+            LOG.info(`[DELETE-ROOM] Error while deleting all rooms`, systemLogEvent("delete-room"))
+            return resp.json({
+                "resp": `Error: rooms not deleted`
+            })
+        }
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+app.post('/enviar-encuesta-tk', async (req, resp) => {
+    const idSala = req.body.idSala
+    const idUsuario = req.body.idUsuario
+    try{
+        const form_answers = {
+            1: { evitando: 'A', acomodando: 'B'},
+            2: { comprometiendo: 'A', colaborando: 'B'},
+            3: { compitiendo: 'A', acomodando: 'B'},
+            4: { comprometiendo: 'A', acomodando: 'B'},
+            5: { colaborando: 'A', evitando: 'B'},
+            6: { evitando: 'A', compitiendo: 'B'},
+            7: { evitando: 'A', comprometiendo: 'B'},
+            8: { compitiendo: 'A', colaborando: 'B'},
+            9: { evitando: 'A', compitiendo: 'B'},
+            10: { compitiendo: 'A', comprometiendo: 'B'},
+            11: { colaborando: 'A', acomodando: 'B'},
+            12: { evitando: 'A', comprometiendo: 'B'},
+            13: { comprometiendo: 'A', compitiendo: 'B'},
+            14: { colaborando: 'A', compitiendo: 'B'},
+            15: { acomodando: 'A', evitando: 'B'},
+            16: { acomodando: 'A', compitiendo: 'B'},
+            17: { compitiendo: 'A', evitando: 'B'},
+            18: { acomodando: 'A', comprometiendo: 'B'},
+            19: { colaborando: 'A', evitando: 'B'},
+            20: { colaborando: 'A', comprometiendo: 'B'},
+            21: { acomodando: 'A', colaborando: 'B'},
+            22: { comprometiendo: 'A', compitiendo: 'B'},
+            23: { colaborando: 'A', evitando: 'B'},
+            24: { acomodando: 'A', comprometiendo: 'B'},
+            25: { compitiendo: 'A', acomodando: 'B'},
+            26: { comprometiendo: 'A', colaborando: 'B'},
+            27: { evitando: 'A', acomodando: 'B'},
+            28: { compitiendo: 'A', colaborando: 'B'},
+            29: { comprometiendo: 'A', evitando: 'B'},
+            30: { acomodando: 'A', colaborando: 'B'},
+        }
+
+        const user_answer = {
+            1:  req.body.respuestas.question1,
+            2:  req.body.respuestas.question2,
+            3:  req.body.respuestas.question3,
+            4:  req.body.respuestas.question4,
+            5:  req.body.respuestas.question5,
+            6:  req.body.respuestas.question6,
+            7:  req.body.respuestas.question7,
+            8:  req.body.respuestas.question8,
+            9:  req.body.respuestas.question9,
+            10: req.body.respuestas.question10,
+            11: req.body.respuestas.question11,
+            12: req.body.respuestas.question12,
+            13: req.body.respuestas.question13,
+            14: req.body.respuestas.question14,
+            15: req.body.respuestas.question15,
+            16: req.body.respuestas.question16,
+            17: req.body.respuestas.question17,
+            18: req.body.respuestas.question18,
+            19: req.body.respuestas.question19,
+            20: req.body.respuestas.question20,
+            21: req.body.respuestas.question21,
+            22: req.body.respuestas.question22,
+            23: req.body.respuestas.question23,
+            24: req.body.respuestas.question24,
+            25: req.body.respuestas.question25,
+            26: req.body.respuestas.question26,
+            27: req.body.respuestas.question27,
+            28: req.body.respuestas.question28,
+            29: req.body.respuestas.question29,
+            30: req.body.respuestas.question30,
+        }
+
+        const tkTypes = {
+            compitiendo: 0,
+            colaborando: 0,
+            comprometiendo: 0,
+            evitando: 0,
+            acomodando: 0,
+        }
+
+        for (const questionId in user_answer){
+            const answer = user_answer[questionId]
+            const typesForm = form_answers[questionId]
+            for (const typeName in typesForm){
+                if (typesForm[typeName] === answer){
+                    tkTypes[typeName]++
+                }
+            }
+        }
+        const user_resp = {
+            idUsuario: req.body.idUsuario,
+            idSala: idSala,
+            score: tkTypes,
+            answers: user_answer
+        }
+        const client = await MongoClient.connect(url);
+        const db = client.db(dbName);
+        const result = await db.collection("cuestionario-tk").insertOne(user_resp)
+        client.close()
+        if (result.insertedId) {
+            LOG.info(`[USER-QUESTIONNAIRE-TK] Room ${idSala}: User ${idUsuario} ended the questionnaire`, systemLogEvent("user-final-questionnaire"))
+            return resp.json({
+                resp: "ok"
+            })
+        } 
+        return resp.json({
+            resp: "error"
+        })
+    }
+    catch(error){
+        console.log(error)
+    }
+})
+
+
+app.get("/ejecutar-recomendacion-individualv3", async (req, res) => {
+    const idUsuario = req.query.idUsuario
+    const idGrupo = req.query.idGrupo
+    try {
+        LOG.info(`[INDIVIDUAL-RECOMMENDATION] Room: ${idGrupo}: User ${idUsuario} has started individual recommendation`, systemLogEvent("individual-rec"))
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const usuario = await db.collection("usuarios").findOne({ _id: new ObjectId(idUsuario) })
+        if (usuario) {
+            // fecha recomendacion
+            const tiempo_actual = Date.now()
+
+            // crear directorio del usuario si no existe /recomendaciones/usuarios/id
+            const directorioUsuario = dir_recommendations_users + "/" + idUsuario
+            // /recomendaciones/usuarios/id/data
+            const directorioDataUsuario = directorioUsuario + "/data"
+
+            if (!fs.existsSync(directorioUsuario)) {
+                fs.mkdirSync(directorioUsuario)
+            }
+            if (!fs.existsSync(directorioDataUsuario)) {
+                fs.mkdirSync(directorioDataUsuario)
+            }
+            //const userData = directorioDataUsuario + "/user_data"
+
+            // /recomendaciones/usuarios/id/data/users_data
+            const userData = directorioDataUsuario + "/users_data"
+
+            fs.writeFileSync(userData, '')
+
+            // añadir calificaciones de usuario al dataset
+            usuario.calificaciones.forEach((item) => {
+                var linea = item.linea
+                fs.appendFileSync(userData, linea)
+            })
+
+            // crear y/o reiniciar properties de la sala
+            const directorioUsuarioProperties = directorioUsuario + "/user.properties"
+            fs.copyFileSync(user_recomendations_properties, directorioUsuarioProperties)
+
+            // agregar propiedades a las propiedades del grupo
+            const semilla = String(8348)
+            const recommenderAlgo = "biasedmf"
+            const directorioResultado = recommendations_results_users + "/" + idGrupo 
+
+            if (!fs.existsSync(directorioResultado)){
+                fs.mkdirSync(directorioResultado)
+            }
+
+            if (!fs.existsSync(directorioResultado+"/"+idUsuario)){
+                fs.mkdirSync(directorioResultado+"/"+idUsuario)
+            }
+
+            const dataInputPathName = "users_data"
+            fs.appendFileSync(directorioUsuarioProperties, "\nrec.random.seed=" + semilla + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "rec.recommender.class=" + recommenderAlgo + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "dfs.data.dir=" + directorioDataUsuario + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "data.input.path=" + dataInputPathName + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "user.id=" + idUsuario +"\n")
+            fs.appendFileSync(directorioUsuarioProperties, "show.dataset.ratings=false" + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "show.individual.ratings=true" + "\n")
+            fs.appendFileSync(directorioUsuarioProperties, "dfs.result.dir=" + directorioResultado)
+
+            // ejectuar grouplibrec
+            const args = ["-jar", exec_librec, "individual", directorioUsuarioProperties, dir_individual_datamodel, dir_individual_basemodel]
+            const grouplibrec = spawn("java", args)
+            grouplibrec.on("close", async (code) => {
+                if (code === 0) {
+                    // devolver items recomendados para el grupo
+                    console.log(`exit success: ${code}`)
+                    const directorioResultadosSala = recommendations_results_users + "/" + idGrupo + "/" + idUsuario + "/"
+                    let items = []
+                    const recomendaciones = fs.readdirSync(directorioResultadosSala)
+                    //const directorioUltimaRecomendacion = recomendaciones.sort()[recomendaciones.length - 1]
+
+                    const currentTimestamp = Date.now();
+                    const differences = recomendaciones.map(millisecond => Math.abs(parseInt(millisecond) - currentTimestamp));
+                    const closestIndex = differences.indexOf(Math.min(...differences));
+                    const directorioUltimaRecomendacion = recomendaciones[closestIndex];
+
+                    let trecomendaciones = fs.readFileSync(directorioResultadosSala + directorioUltimaRecomendacion + "/recommendations.txt", "utf-8")
+                    let arrayRecomendaciones = trecomendaciones.split("\n")
+
+                    //var data2 = fs.readFileSync(dir_tracks_data, "utf-8")
+                    //data2 = data2.split("\n")
+                    let max_recommend = 2
+                    let usuario_rec = usuario.librec_rec
+                    let count_item = 0
+                    for (let i = 0; i < arrayRecomendaciones.length - 1; i++) {
+                        if (count_item === 5){
+                            break
+                        }
+                        if(arrayRecomendaciones[i] === ''){
+                            continue
+                        }
+
+                        let recomendacion = arrayRecomendaciones[i].split(",");
+                        let grupo = recomendacion[0];
+                        let item = parseInt(recomendacion[1]);
+                        let rating_individual = recomendacion[2];
+
+                        let found_item = await db.collection("tracks").findOne({ item_id: parseInt(item) })
+                        if(found_item === null || found_item.item_id === null){
+                            continue
+                        }
+
+                        if (usuario_rec[item] === undefined){
+                            usuario_rec[item] = 1
+                            await db.collection("usuarios").updateOne(
+                                { _id: new ObjectId(idUsuario) },
+                                { $set: { librec_rec: usuario_rec }}
+                                )
+                        }
+                        else{
+                            usuario_rec[item] += 1
+                            await db.collection("usuarios").updateOne(
+                                { _id: new ObjectId(idUsuario) },
+                                { $set: { librec_rec: usuario_rec }}
+                                )
+                            if (usuario_rec[item] >= max_recommend){
+                                continue
+                            }
+                        }
+                        count_item+=1
+
+                        let trackItemId = found_item.item_id
+                        let nombreItem = found_item.track_name
+                        let tipoItem = found_item.track_category
+                        let url_item = found_item.track_url
+                        let idAutor = found_item.artist_id
+                        let nombreAutor = found_item.artist_name
+                        let urlAutor = found_item.artist_url
+                        let originAutor = found_item.artist_country
+                        let continentAutor = found_item.artist_continent
+
+                        let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg";
+                        if (fs.existsSync(path_imagen)) {
+                            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg";
+                        } else {
+                            path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png";
+                        }
+                        items.push({
+                            idItem: String(item),
+                            rating: rating_individual,
+                            pathImagen: path_imagen,
+                            pathItem: path_imagen,
+                            nombreItem: nombreItem,
+                            tipoItem: tipoItem,
+                            url_item: url_item,
+                            id_autor: idAutor,
+                            nombre_autor: nombreAutor,
+                            url_autor: urlAutor,
+                            origin_autor: originAutor,
+                            continent_autor: continentAutor,
+                        });
+                    }
+
+                    let goal = 5
+                    if (items.length < goal){
+                        const cant_data = 443920
+                        while (items.length < goal){
+                            console.log("CHECK")
+                            let random = Math.floor(Math.random() * cant_data) + 1
+                            let found_item = await db.collection("tracks").findOne({ track_id: parseInt(random) })
+                            if (found_item === null){
+                                continue
+                            }
+                            let trackItemId = found_item.item_id
+                            let nombreItem = found_item.track_name
+                            let tipoItem = found_item.track_category
+                            let url_item = found_item.track_url
+                            let idAutor = found_item.artist_id
+                            let nombreAutor = found_item.artist_name
+                            let urlAutor = found_item.artist_url
+                            let originAutor = found_item.artist_country
+                            let continentAutor = found_item.artist_continent
+
+                            let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg";
+                            if (fs.existsSync(path_imagen)) {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg";
+                            } else {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png";
+                            }
+                            items.push({
+                                idItem: String(random),
+                                rating: 5,
+                                pathImagen: path_imagen,
+                                pathItem: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                url_item: url_item,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                            });
+                        }
+                    }
+
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("usuarios").updateOne(
+                        { _id: new ObjectId(idUsuario) },
+                        {
+                            $push:
+                            {
+                                recomendaciones:
+                                    { idSala: idGrupo, time: tiempo_actual, items: items_ordenados }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+                else {
+                    console.log(`exit error: ${code}`)
+                    let goal = 5
+                    if (items.length < goal){
+                        const cant_data = 443920
+                        while (items.length < goal){
+                            console.log("CHECK")
+                            let random = Math.floor(Math.random() * cant_data) + 1
+                            let found_item = await db.collection("tracks").findOne({ track_id: parseInt(random) })
+                            if (found_item === null){
+                                continue
+                            }
+                            let trackItemId = found_item.item_id
+                            let nombreItem = found_item.track_name
+                            let tipoItem = found_item.track_category
+                            let url_item = found_item.track_url
+                            let idAutor = found_item.artist_id
+                            let nombreAutor = found_item.artist_name
+                            let urlAutor = found_item.artist_url
+                            let originAutor = found_item.artist_country
+                            let continentAutor = found_item.artist_continent
+
+                            let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg";
+                            if (fs.existsSync(path_imagen)) {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg";
+                            } else {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png";
+                            }
+                            items.push({
+                                idItem: String(random),
+                                rating: 5,
+                                pathImagen: path_imagen,
+                                pathItem: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                url_item: url_item,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                            });
+                        }
+                    }
+
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("usuarios").updateOne(
+                        { _id: new ObjectId(idUsuario) },
+                        {
+                            $push:
+                            {
+                                recomendaciones:
+                                    { idSala: idGrupo, time: tiempo_actual, items: items_ordenados }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+app.get("/ejecutar-recomendacion-grupalv3", async (req, res) => {
+    const idSala = req.query.idGrupo
+    try {
+
+        LOG.info(`[GROUP-RECOMMENDATION] Room ${idSala}: Group Recommendation has started`, systemLogEvent("group-rec"))
+        const client = await MongoClient.connect(url)
+        const db = client.db(dbName)
+        const sala = await db.collection("salas").findOne({ _id: new ObjectId(idSala) })
+        const groupUsers = []
+        if (sala) {
+            // fecha recomendacion
+            const tiempo_actual = Date.now()
+
+            // crear directorio del grupo si no existe
+            const directorioGrupo = dir_recommendations_rooms + "/" + idSala
+            const directorioDataGrupo = directorioGrupo + "/data"
+
+            if (!fs.existsSync(directorioGrupo)) {
+                fs.mkdirSync(directorioGrupo)
+            }
+            if (!fs.existsSync(directorioDataGrupo)) {
+                fs.mkdirSync(directorioDataGrupo)
+            }
+            //const usersDataGroup = directorioDataGrupo + "/users_data"
+            const usersDataGroup = directorioDataGrupo + "/users_data"
+
+            fs.writeFileSync(usersDataGroup, '')
+
+            // añadir calificaciones de usuarios al dataset
+            sala.usuarios_activos.forEach(async (usuario) => {
+                groupUsers.push(usuario._id.toString())
+                const user = await db.collection("usuarios").findOne({ _id: new ObjectId(usuario._id.toString()) })
+                user.calificaciones.forEach((calificacion) => {
+                    var idItem = calificacion.id_item
+                    var linea = calificacion.linea
+                    fs.appendFileSync(usersDataGroup, linea)
+                })
+            })
+
+            // crear y/o reiniciar properties de la sala
+            const directorioProperties = directorioGrupo + "/group.properties"
+            fs.copyFileSync(group_recomendations_properties, directorioProperties)
+    
+            let groupSimilarSize = groupUsers.length
+            let groupModelPath
+            let groupDataModelPath
+
+            if (groupSimilarSize <= 1 || groupSimilarSize >= 5){
+                return res.json({
+                    "resp": "group size must be 2, 3 or 4"
+                })
+            }
+
+            if (groupSimilarSize === 2){
+                groupModelPath = dir_group_size_2_basemodel
+                groupDataModelPath = dir_group_size_2_datamodel
+            }
+            else if(groupSimilarSize === 3){
+                groupModelPath = dir_group_size_3_basemodel
+                groupDataModelPath = dir_group_size_3_datamodel
+            }
+            else if(groupSimilarSize === 4){
+                groupModelPath = dir_group_size_4_basemodel
+                groupDataModelPath = dir_group_size_4_datamodel
+            }
+
+            let group_ids = groupUsers.join(",")
+
+
+            // agregar propiedades a las propiedades del grupo
+            const semilla = String(647483) + "\n"
+            const recommenderAlgo = "biasedmf"
+            const directorioData = usersDataGroup 
+            const directorioResultado = dir_recommendations_results 
+            const dataInputPathName = "users_data" 
+            fs.appendFileSync(directorioProperties, "\nrec.random.seed=" + semilla + "\n")
+            fs.appendFileSync(directorioProperties, "group.base.recommender.class=" + recommenderAlgo + "\n")
+            fs.appendFileSync(directorioProperties, "dfs.data.dir=" + directorioDataGrupo + "\n")
+            fs.appendFileSync(directorioProperties, "group.similar.groupSize=" + String(groupSimilarSize) +"\n")
+            fs.appendFileSync(directorioProperties, "data.input.group.path=" + dataInputPathName +"\n")
+            fs.appendFileSync(directorioProperties, "group.new=true" + "\n")
+            fs.appendFileSync(directorioProperties, "group.users.ids="+ group_ids + "\n")
+            fs.appendFileSync(directorioProperties, "group.id="+ idSala + "\n")
+            fs.appendFileSync(directorioProperties, "show.group.ratings=true" + "\n")
+
+            fs.appendFileSync(directorioProperties, "dfs.result.dir=" + directorioResultado +"\n")
+
+            // ejectuar grouplibrec
+            const args = ["-jar", exec_librec, "group", directorioProperties, groupDataModelPath, groupModelPath ]
+            //const javaVersionPath = "/home/asmith/java/java-11-openjdk-amd64/bin/java"
+            const grouplibrec = spawn("java", args)
+            grouplibrec.on("close", async (code) => {
+                if (code === 0) {
+                    // devolver items recomendados para el grupo
+                    console.log(`exit success: ${code}`)
+                    const directorioResultadosSala = dir_recommendations_results + "/" + idSala + "/"
+                    let items = []
+                    const recomendaciones = fs.readdirSync(directorioResultadosSala)
+                    const directorioUltimaRecomendacion = recomendaciones.sort()[recomendaciones.length - 1]
+                    let trecomendaciones = fs.readFileSync(directorioResultadosSala + directorioUltimaRecomendacion + "/recommendations.txt", "utf-8")
+                    let arrayRecomendaciones = trecomendaciones.split("\n")
+
+                    let max_recommend = 2
+                    let grupo_rec = sala.librec_rec
+                    let count_item = 0
+
+                    for (let i = 0; i < arrayRecomendaciones.length - 1; i++) {
+                        if (count_item === 5){
+                            break
+                        }
+                        if(arrayRecomendaciones[i] === ''){
+                            continue
+                        }
+                        let recomendacion = arrayRecomendaciones[i].split(",")
+                        let grupo = recomendacion[0]
+                        let item = recomendacion[1]
+                        let rating_grupo = recomendacion[2]
+                        if (item) {
+                            let found_item = await db.collection("tracks").findOne({ item_id: parseInt(item) })
+                            if(found_item === null || found_item.item_id === null){
+                                continue
+                            }
+
+                            if(found_item.artist_name === 'Kanye West'){
+                                continue
+                            }
+
+                            if (grupo_rec[item] === undefined){
+                                grupo_rec[item] = 1
+                                await db.collection("salas").updateOne(
+                                    { _id: new ObjectId(idSala) },
+                                    { $set: { librec_rec: grupo_rec }}
+                                    )
+                            }
+                            else{
+                                grupo_rec[item] += 1
+                                await db.collection("salas").updateOne(
+                                    { _id: new ObjectId(idSala) },
+                                    { $set: { librec_rec: grupo_rec }}
+                                    )
+                                if (grupo_rec[item] >= max_recommend){
+                                    continue
+                                }
+                            }
+                            count_item+=1
+
+                            let trackItemId = found_item.item_id
+                            let nombreItem = found_item.track_name
+                            let tipoItem = found_item.track_category
+                            let url_item = found_item.track_url
+                            let idAutor = found_item.artist_id
+                            let nombreAutor = found_item.artist_name
+                            let urlAutor = found_item.artist_url
+                            let originAutor = found_item.artist_country
+                            let continentAutor = found_item.artist_continent
+
+                            let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg"
+                            if (fs.existsSync(path_imagen)) {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg"
+                            }
+                            else {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png"
+                            }
+
+                            items.push({
+                                idGrupo: grupo,
+                                idItem: item,
+                                rating: rating_grupo,
+                                pathImagen: path_imagen,
+                                pathItem: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                url_item: url_item,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                            })
+                        }
+                    }
+                    console.log(items)
+
+                    let goal = 5
+                    if (items.length < goal){
+                        const cant_data = 443920
+                        while (items.length < goal){
+                            let random = Math.floor(Math.random() * cant_data) + 1
+                            let found_item = await db.collection("tracks").findOne({ track_id: parseInt(random) })
+                            if (found_item === null){
+                                continue
+                            }
+                            let trackItemId = found_item.item_id
+                            let nombreItem = found_item.track_name
+                            let tipoItem = found_item.track_category
+                            let url_item = found_item.track_url
+                            let idAutor = found_item.artist_id
+                            let nombreAutor = found_item.artist_name
+                            let urlAutor = found_item.artist_url
+                            let originAutor = found_item.artist_country
+                            let continentAutor = found_item.artist_continent
+
+                            let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg";
+                            if (fs.existsSync(path_imagen)) {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg";
+                            } else {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png";
+                            }
+                            items.push({
+                                idItem: String(random),
+                                rating: 5,
+                                pathImagen: path_imagen,
+                                pathItem: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                url_item: url_item,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                            });
+                        }
+                    }
+
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("salas").updateOne(
+                        { _id: new ObjectId(idSala) },
+                        {
+                            $addToSet: {
+                                recomendaciones_grupal: {
+                                    time: tiempo_actual,
+                                    items: items_ordenados
+                                }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+                else {
+                    console.log(`exit error: ${code}`)
+                    let goal = 5
+                    let items = []
+                    if (items.length < goal){
+                        const cant_data = 443920
+                        while (items.length < goal){
+                            let random = Math.floor(Math.random() * cant_data) + 1
+                            let found_item = await db.collection("tracks").findOne({ track_id: parseInt(random) })
+                            console.log(found_item)
+                            if (found_item === null){
+                                continue
+                            }
+                            let trackItemId = found_item.item_id
+                            let nombreItem = found_item.track_name
+                            let tipoItem = found_item.track_category
+                            let url_item = found_item.track_url
+                            let idAutor = found_item.artist_id
+                            let nombreAutor = found_item.artist_name
+                            let urlAutor = found_item.artist_url
+                            let originAutor = found_item.artist_country
+                            let continentAutor = found_item.artist_continent
+
+                            let path_imagen = dir_dataset_images + "/" + String(idAutor) + ".jpg";
+                            if (fs.existsSync(path_imagen)) {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/" + String(idAutor) + ".jpg";
+                            } else {
+                                path_imagen = "http://" + server_ip + ":" + server_port + dataset_images + "/no_existe.png";
+                            }
+                            items.push({
+                                idItem: String(random),
+                                rating: 5,
+                                pathImagen: path_imagen,
+                                pathItem: path_imagen,
+                                nombreItem: nombreItem,
+                                tipoItem: tipoItem,
+                                url_item: url_item,
+                                id_autor: idAutor,
+                                nombre_autor: nombreAutor,
+                                url_autor: urlAutor,
+                                origin_autor: originAutor,
+                                continent_autor: continentAutor,
+                            });
+                            console.log(items)
+                        }
+                    }
+
+                    let items_ordenados = items.sort(function (a, b) {
+                        return b.ratingGrupo - a.ratingGrupo
+                    })
+
+                    await db.collection("salas").updateOne(
+                        { _id: new ObjectId(idSala) },
+                        {
+                            $addToSet: {
+                                recomendaciones_grupal: {
+                                    time: tiempo_actual,
+                                    items: items_ordenados
+                                }
+                            }
+                        }
+                    )
+                    client.close()
+                    return res.json(items_ordenados)
+                }
+            })
+        }
+    }
+    catch (error) {
+        console.log(error)
+    }
+})
+
+
+server.listen(8000)
+
+console.log("Servidor iniciado en puerto 8000")

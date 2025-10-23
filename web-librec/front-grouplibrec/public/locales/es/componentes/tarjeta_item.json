@@ -1,0 +1,8 @@
+{
+    "main":{
+        "item": {
+            "recommendedBy": "Recomendado por",
+            "missingRating": "Falta calificar"
+        }
+    }
+}

@@ -1,0 +1,26 @@
+{
+    "main":{
+        "title": "Welcome {{user}}!",
+        "roomsTitle": "Available rooms",
+        "table": {
+            "roomName": "Room name",
+            "leaderName": "Leader",
+            "availableUsers": "Users",
+            "description": "Description",
+            "more": "Status",
+            "enter": "Enter",
+            "state": {
+                "open": "Open",
+                "closed": "Closed",
+                "full": "Full"
+            },
+            "alert": {
+                "state": {
+                    "closed": "The room is closed, is not posible to enter",
+                    "full": "The room is full, is not posible to enter"
+                }
+            }
+        },
+        "createRoom": "Create room"
+    }
+}

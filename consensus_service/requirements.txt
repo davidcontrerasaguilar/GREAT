@@ -1,0 +1,4 @@
+fastapi==0.103.1
+uvicorn==0.23.2
+gr-aggregation==0.0.3 # GREAT consensus service https://github.com/asmithz/gr-aggregations | https://pypi.org/project/gr-aggregation/
+pymongo==4.5.0

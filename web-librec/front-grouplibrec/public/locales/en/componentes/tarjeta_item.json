@@ -1,0 +1,8 @@
+{
+    "main":{
+        "item": {
+            "recommendedBy": "Recommended by",
+            "missingRating": "Missing rating"
+        }
+    }
+}

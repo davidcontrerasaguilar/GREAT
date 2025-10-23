@@ -1,0 +1,50 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom"
+import Interfaz from "./paginas/interfaz"
+import Login from "./paginas/login"
+import Sala from "./paginas/salas"
+import Registrar from "./paginas/registrar"
+import Ingresar from "./paginas/ingresar"
+import Grupo from "./paginas/grupo"
+import SalaEspera from "./paginas/sala_espera"
+import TestPersonalidad from "./paginas/test_personalidad"
+import TestPerfilUsuario from "./paginas/test_perfil"
+import EncuestaFinal from "./paginas/encuesta_final"
+import { Suspense } from "react"
+import ChangeLanguage from "./componentes/ChangeLanguage" 
+import EndTest from "./paginas/end-test"
+import TrainningRoom from "./paginas/train"
+import RoomEnd from "./paginas/room-end"
+import EncuestaTK from "./paginas/test_tk"
+
+function App() {
+  return (
+      <BrowserRouter>
+        <Routes>
+          <Route exact path="/" element={<Ingresar />}></Route>
+          <Route exact path="/salas" element={<Sala />}></Route>
+          <Route exact path="/registrar" element={<Registrar />}></Route>
+          <Route exact path="/grupo/:id" element={<Grupo />}></Route>
+          <Route exact path="/sala-espera/:id" element={<SalaEspera />}></Route>
+          <Route exact path="/encuesta-final/:id" element={<EncuestaFinal />}></Route>
+          <Route exact path="/test-personalidad" element={<TestPersonalidad />}></Route>
+          <Route exact path="/test-perfil" element={<TestPerfilUsuario />}></Route>
+          <Route exact path="/end-test" element={<EndTest />}></Route>
+          <Route exact path="/trainning-room/:id" element={<TrainningRoom />}></Route>
+          <Route exact path="/room-end" element={<RoomEnd />}></Route>
+          <Route exact path="/test-tk/:id" element={<EncuestaTK />}></Route>
+          <Route path="/socket.io/*" element={null} />
+        </Routes>
+      </BrowserRouter>
+  );
+}
+
+export default function WrappedApp() {
+  return(
+    <Suspense fallback="Loading...">
+      <App/>
+      <ChangeLanguage />
+    </Suspense>
+  )
+}
+
+//export default App;
